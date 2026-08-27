@@ -95,10 +95,12 @@ executor 的 JSON Schema 子集校验 → 工具级 `validate_input` → 文件�
 工具 handler 不直接改主循环状态。成功后 executor 统一维护：
 
 - `read_file`/`edit_file`/`write_file`（及兼容别名 `filewrite`）成功 + `metadata.path` → 追加 `state.metadata["files_read"]`。
-- `edit_file`/`write_file` → 追加 `files_changed`；命中 `.onecode/memory/*.md` → 记录 `long_term_memory_writes`。
+- `edit_file`/`write_file` → 追加 `files_changed`；命中 `.nervure/memory/*.md` 或 legacy `.onecode/memory/*.md` → 记录 `long_term_memory_writes`。
 - 文件工具成功 → `file_state_cache.snapshot_path()`（partial read 标记 offset/limit）。
 
 `skill` 工具结果中的 `metadata.allowed_tools` 不由 executor 写入共享 session grant；fork skill 的临时授权由 child-local permission policy 处理，inline skill 只加载内容。
+
+工具可观测性按唯一 `tool_call_id` 识别一次调用。`tool_preflight`、`tool_execution` 和 `tool_result` 是同一调用的生命周期记录，评测分析器不得把这些 span 直接相加，否则会把工具调用数和后续序列重复计算。`tool_result` 记录结果长度、截断与错误摘要；debug trace 才允许在统一上限内保留结果正文。
 
 ### followup_messages
 

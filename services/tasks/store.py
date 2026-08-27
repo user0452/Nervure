@@ -38,7 +38,9 @@ class TaskClaimResult:
 class TaskStore:
     def __init__(self, workspace: Path | str) -> None:
         self.workspace = Path(workspace)
-        self.root = self.workspace / ".onecode" / "tasks"
+        primary = self.workspace / ".nervure" / "tasks"
+        legacy = self.workspace / ".onecode" / "tasks"
+        self.root = primary if primary.exists() or not legacy.exists() else legacy
         self._lock = threading.RLock()
 
     def tasks_dir(self, task_list_id: str) -> Path:

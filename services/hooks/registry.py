@@ -23,20 +23,38 @@ class HookResult:
 HookCallback = Callable[[HookPayload], HookResult | Awaitable[HookResult | None] | None]
 
 
+@dataclass
+class _Registration:
+    callback: HookCallback
+    priority: int
+    enabled: bool
+    name: str
+
+
 class HookRegistry:
     def __init__(self, trace_recorder: TraceRecorder | None = None) -> None:
-        self._callbacks: dict[HookEvent, list[HookCallback]] = {
+        self._callbacks: dict[HookEvent, list[_Registration]] = {
             event: [] for event in HookEvent
         }
         self._trace_recorder = trace_recorder or TraceRecorder.noop()
 
-    def register(self, event: HookEvent, callback: HookCallback) -> None:
-        self._callbacks[event].append(callback)
+    def register(self, event: HookEvent, callback: HookCallback, *, priority: int = 0, enabled: bool = True, name: str | None = None) -> str:
+        registration = _Registration(callback, priority, enabled, name or getattr(callback, "__name__", "hook"))
+        self._callbacks[event].append(registration)
+        self._callbacks[event].sort(key=lambda item: (-item.priority, item.name))
+        return registration.name
+
+    def set_enabled(self, event: HookEvent, name: str, enabled: bool) -> bool:
+        for registration in self._callbacks[event]:
+            if registration.name == name:
+                registration.enabled = enabled
+                return True
+        return False
 
     async def run(self, event: HookEvent, payload: HookPayload) -> HookResult:
         trace_attributes = {
             "hook_event": event.value,
-            "callback_count": len(self._callbacks[event]),
+            "callback_count": sum(1 for callback in self._callbacks[event] if callback.enabled),
             "tool_name": _payload_tool_name(payload),
             "tool_call_id": _payload_tool_call_id(payload),
         }
@@ -47,15 +65,18 @@ class HookRegistry:
             merged_input: dict[str, Any] | None = None
             metadata: dict[str, Any] = {}
             blocking = False
-            for callback in self._callbacks[event]:
+            for registration in self._callbacks[event]:
+                if not registration.enabled:
+                    continue
                 try:
-                    result = callback(payload)
+                    result = registration.callback(payload)
                     if inspect.isawaitable(result):
                         result = await result
                 except Exception as exc:
                     # hook 异常会被记录，但不会打断运行时 hook 链；
                     # 只有显式 blocking_error 才能阻止工具执行。
                     metadata.setdefault("hook_errors", []).append(str(exc))
+                    self._trace_recorder.event("hook_error", {"hook_event": event.value, "hook_name": registration.name, "error_type": type(exc).__name__})
                     continue
                 if result is None:
                     continue

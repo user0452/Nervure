@@ -1,4 +1,4 @@
-# OneCode
+# Nervure
 
 中文 | [English](README_en.md)
 
@@ -9,22 +9,22 @@
 
 ![演示动图](docs/assets/demo.gif)
 
-OneCode 是一个基于 **Harness** 工程理念实现的 **CodeAgent**。它把大模型当作具有工具调用能力的执行者，用一个稳定可控的工程框架去约束它、组织它、并承接它的副作用，从而让 AI 能够在真实环境中可靠地完成长链路编码任务，而不会失控越界。
+Nervure 是一个基于 **Harness** 工程理念实现的 **CodeAgent**。它把大模型当作具有工具调用能力的执行者，用一个稳定可控的工程框架去约束它、组织它、并承接它的副作用，从而让 AI 能够在真实环境中可靠地完成长链路编码任务，而不会失控越界。
 
-[项目介绍Slide](docs/assets/onecode-intro.html) (该演示由 OneCode 使用 `frontend-slides` skill 生成)。
+[项目介绍Slide](docs/assets/onecode-intro.html) (该演示由 Nervure 使用 `frontend-slides` skill 生成)。
 
 ---
 
 ## 核心功能
 
 ### 主循环 
-OneCode 围绕一个薄而稳定的主循环展开，驱动 agent 的"思考—行动—观察"流程。主循环只负责编排 agent 的生命周期：确定性的状态转换负责处理错误恢复、预算控制和会话结束，而不会让 agent 的能力扩张污染这一层的逻辑。
+Nervure 围绕一个薄而稳定的主循环展开，驱动 agent 的"思考—行动—观察"流程。主循环只负责编排 agent 的生命周期：确定性的状态转换负责处理错误恢复、预算控制和会话结束，而不会让 agent 的能力扩张污染这一层的逻辑。
 
 ### 通过 Hooks 机制实现扩展 
 所有的非核心能力都通过 **钩子(Hook)** 接入：开发者可以在主循环的关键节点注入确定性的工程约束、安全规则和业务逻辑，把那些仅靠模型 prompt 无法保证的行为兜底为代码。Hooks 与主循环解耦，新增能力不需要修改主循环本身。
 
 ### 上下文工程 
-OneCode 把每轮送入模型的上下文视为一项工程产物：消息链、transcript、快照在每轮都会被运行时状态动态重建；多级压缩、长期记忆、`@mention` 附件投影以及动态 system prompt 协同工作，确保模型始终看到高信息密度的内容，而不是越积越多的历史消息。
+Nervure 把每轮送入模型的上下文视为一项工程产物：消息链、transcript、快照在每轮都会被运行时状态动态重建；多级压缩、长期记忆、`@mention` 附件投影以及动态 system prompt 协同工作，确保模型始终看到高信息密度的内容，而不是越积越多的历史消息。
 
 ### 可扩展的工具体系 
 所有的内置能力和外部扩展都通过统一的 **工具注册表** 接入：注册表定义工具的执行逻辑、权限边界和错误反馈契约，工具在受控环境中执行，任何异常都会被捕获并转化为上下文反馈。内置工具覆盖文件、命令、检索、附件、后台任务、子 agent 等场景；外部能力通过 **Skill** 和 **MCP** 以同样的方式注册进来。
@@ -48,7 +48,7 @@ OneCode 把每轮送入模型的上下文视为一项工程产物：消息链、
 
 ## 快速开始
 
-OneCode 需要 **Python 3.11 或以上版本**，并使用 [uv](https://docs.astral.sh/uv/) 管理依赖。
+Nervure 需要 **Python 3.11 或以上版本**，并使用 [uv](https://docs.astral.sh/uv/) 管理依赖。
 
 ### 1. 准备环境
 
@@ -60,7 +60,7 @@ uv sync --dev
 cp .env.example .env
 ```
 
-OneCode 的模型 Provider 配置从 `.env` 读取。如果暂时不想配置，可以直接启动终端，在终端内使用 `/connect` 命令配置。
+Nervure 的模型 Provider 配置从 `.env` 读取。如果暂时不想配置，可以直接启动终端，在终端内使用 `/connect` 命令配置。
 
 ### 2. 启动终端
 
@@ -82,7 +82,7 @@ echo "帮我列出当前目录的文件" | uv run python -m ui.cli.app
 
 ## 开发指南
 
-OneCode 是一个典型的 harness-style 工程：项目的目标架构、知识地图、工作约定都以文档形式显式维护，再由 AI agent及开发者按文档执行。这种模式下，文档本身就是接口，遵循文档比遵循 prompt 更重要。
+Nervure 是一个典型的 harness-style 工程：项目的目标架构、知识地图、工作约定都以文档形式显式维护，再由 AI agent及开发者按文档执行。这种模式下，文档本身就是接口，遵循文档比遵循 prompt 更重要。
 
 - **理解项目 — 阅读 [`AGENTS.md`](AGENTS.md)**：`AGENTS.md` 是 agent 进入本仓库的入口文件。它说明项目知识的存放位置、推荐的阅读顺序、依赖边界约束、环境准备方式以及常用命令。当你（或一个 AI agent）第一次接触这个仓库，应当从 `AGENTS.md` 开始，再按它指明的顺序阅读 `architecture.md` 和 `docs/design-docs/`。
 - **阅读设计 — 查看 [`architecture.md`](architecture.md)**：根架构文档定义目标运行时结构、逻辑分层、核心抽象和依赖方向；模块级的设计细节请按需进入 `docs/design-docs/` 下的对应文档。
@@ -99,7 +99,7 @@ OneCode 是一个典型的 harness-style 工程：项目的目标架构、知识
 
 ## 模块文档索引
 
-想深入了解 OneCode 各模块的设计与实现，请查阅以下文档：
+想深入了解 Nervure 各模块的设计与实现，请查阅以下文档：
 
 **核心编排**
 - [`core-runtime-architecture.md`](docs/design-docs/core-runtime-architecture.md) — `core/` 编排层

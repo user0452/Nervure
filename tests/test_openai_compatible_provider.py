@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from infrastructure.config.env import ResolvedProviderConfig, load_provider_config
+from infrastructure.config.env import (
+    ResolvedProviderConfig,
+    load_provider_config,
+    load_trace_settings,
+)
 from infrastructure.config.env import provider_env_prefix
 from infrastructure.providers.catalog import BUILTIN_PROVIDERS, get_provider_definition
 from infrastructure.providers.chat_completions import OpenAICompatibleChatCompletionsClient
@@ -173,6 +177,10 @@ def test_catalog_contains_builtin_providers() -> None:
         if provider_id not in {"custom", "claude-openai-compatible"}:
             assert BUILTIN_PROVIDERS[provider_id].base_url
 
+    claude = BUILTIN_PROVIDERS["claude-openai-compatible"]
+    assert claude.requires_base_url is True
+    assert claude.base_url == ""
+
 
 def test_load_provider_config_from_dotenv_file(tmp_path: Path) -> None:
     env_path = write_env(
@@ -199,6 +207,36 @@ def test_load_provider_config_requires_dotenv_file(tmp_path: Path) -> None:
         load_provider_config(tmp_path / ".env")
 
     assert exc_info.value.error_type == "configuration_error"
+
+
+def test_load_trace_settings_supports_debug_and_result_limit(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "ONECODE_TRACE_LEVEL=debug\nONECODE_MAX_TOOL_RESULT_CHARS=321\n",
+        encoding="utf-8",
+    )
+
+    settings = load_trace_settings(env_path)
+
+    assert settings.trace_level == "debug"
+    assert settings.max_tool_result_chars == 321
+
+
+def test_load_trace_settings_uses_process_env_only_when_explicitly_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("# trace settings absent in Harbor workspace\n", encoding="utf-8")
+    monkeypatch.setenv("ONECODE_TRACE_LEVEL", "debug")
+    monkeypatch.setenv("ONECODE_MAX_TOOL_RESULT_CHARS", "456")
+
+    default_settings = load_trace_settings(env_path)
+    headless_settings = load_trace_settings(env_path, allow_process_env=True)
+
+    assert default_settings.trace_level == "normal"
+    assert default_settings.max_tool_result_chars == 12_000
+    assert headless_settings.trace_level == "debug"
+    assert headless_settings.max_tool_result_chars == 456
 
 
 def test_load_provider_config_requires_api_key(tmp_path: Path) -> None:
@@ -381,6 +419,32 @@ def test_chat_completions_applies_max_output_token_override() -> None:
     assert transport.post_calls[0][2]["max_tokens"] == 64000
 
 
+def test_chat_completions_ignores_unsupported_reasoning_override() -> None:
+    transport = FakeTransport(
+        post_response={"choices": [{"message": {"content": "ok"}}]},
+    )
+    client = OpenAICompatibleChatCompletionsClient(
+        resolved_config(),
+        async_transport=transport,
+    )
+    snapshot = ContextSnapshot(
+        system_prompt="",
+        messages=(),
+        usage_hints={
+            "request_overrides": {
+                "max_output_tokens": 128,
+                "reasoning_effort": "low",
+            }
+        },
+    )
+
+    collect_stream(client, snapshot)
+
+    payload = transport.post_calls[0][2]
+    assert payload["max_tokens"] == 128
+    assert "reasoning_effort" not in payload
+
+
 def test_chat_completions_parses_text_response() -> None:
     transport = FakeTransport(
         post_response={
@@ -413,6 +477,33 @@ def test_chat_completions_parses_text_response() -> None:
     assert response.usage.input_tokens == 10
     assert response.usage.output_tokens == 5
     assert response.usage.cache_read_input_tokens == 3
+    assert response.usage.reasoning_tokens is None
+    assert response.usage.visible_output_tokens is None
+
+
+def test_chat_completions_parses_reasoning_usage_details() -> None:
+    transport = FakeTransport(
+        post_response={
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 8,
+                "completion_tokens_details": {"reasoning_tokens": 5},
+            },
+        },
+    )
+    client = OpenAICompatibleChatCompletionsClient(
+        resolved_config(),
+        async_transport=transport,
+    )
+
+    response = completed_event(
+        collect_stream(client, ContextSnapshot(system_prompt="", messages=()))
+    )
+
+    assert response.usage is not None
+    assert response.usage.reasoning_tokens == 5
+    assert response.usage.visible_output_tokens == 3
 
 
 def test_chat_completions_parses_tool_calls() -> None:

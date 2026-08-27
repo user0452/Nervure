@@ -10,7 +10,7 @@ from core.context_engine import ContextEngine
 from core.loop import AgentLoop
 from core.runtime_state import RuntimeState
 from infrastructure.providers.factory import create_model_client
-from infrastructure.filesystem.onecode_paths import sessions_dir
+from infrastructure.filesystem.nervure_paths import sessions_dir
 from prompts.assembler import DynamicPromptAssembler
 from services.attachments import AttachmentCollector, AttachmentContextPreparer
 from services.background_tasks import BackgroundTaskManager
@@ -18,10 +18,8 @@ from services.context.message_store import MessageStore
 from services.context.current_model_context import CurrentModelContext
 from services.compaction import (
     ContextCompactionService,
-    SessionMemoryExtractionService,
-    SessionMemoryStore,
-    SessionMemoryUpdater,
 )
+from services.checkpoints import CheckpointStore
 from services.guard import SandboxGuard
 from services.observability import ErrorLogRecorder, TraceRecorder
 from services.mcp import McpConnectionManager
@@ -49,7 +47,6 @@ from services.tools.file_state import FileStateCache
 from services.tools.registry import ToolRegistry
 from services.tools.types import ToolDescriptor
 from tools.agent import descriptor as agent_descriptor
-from ui.cli.session_memory import BackgroundSessionMemoryExtractor
 from utils.toolResultStorage import ToolResultStorage
 
 
@@ -62,6 +59,7 @@ class CliRuntime:
     workspace: Path
     state: RuntimeState
     message_store: MessageStore
+    provider_config_path: Path | None = None
     registry: ToolRegistry | None = None
     loop: AgentLoop | None = None
     provider_label: str = ""
@@ -81,9 +79,6 @@ class CliRuntime:
     current_model_context: CurrentModelContext | None = None
     subagent_runner: SubagentRunner | None = None
     compaction_service: ContextCompactionService | None = None
-    session_memory_store: SessionMemoryStore | None = None
-    session_memory_extractor: SessionMemoryExtractionService | None = None
-    session_memory_updater: SessionMemoryUpdater | None = None
     attachment_collector: AttachmentCollector | None = None
     skill_provider: SkillCatalogProvider | None = None
     mcp_manager: McpConnectionManager | None = None
@@ -99,10 +94,11 @@ class CliRuntime:
     base_descriptors: tuple[ToolDescriptor, ...] = ()
     subagent_runner_ref: dict[str, SubagentRunner] | None = None
     long_term_memory_extractor_ref: dict[str, LongTermMemoryExtractionService] | None = None
-    # Plan-mode wiring: the plan store owns the .onecode/plans/ files and the
+    # Plan-mode wiring: the plan store owns the .nervure/plans/ files (with legacy .onecode fallback) and the
     # user-question prompter is invoked by the ask_user_question tool.
     plan_store: PlanStore | None = None
     user_question_prompter: UserQuestionPrompter | None = None
+    checkpoint_store: CheckpointStore | None = None
 
     def with_session(
         self,
@@ -118,28 +114,15 @@ class CliRuntime:
         if self.subagent_runner is not None:
             self.subagent_runner.bind_parent_message_store(message_store)
         state.metadata["workspace"] = str(self.workspace)
-        state.metadata["session_memory_resume_needs_extraction"] = True
-        try:
-            resume_generation = int(
-                state.metadata.get("session_memory_resume_generation", 0)
-            )
-        except (TypeError, ValueError):
-            resume_generation = 0
-        state.metadata["session_memory_resume_generation"] = resume_generation + 1
-        session_memory_store = None
         result_store = ToolResultStorage(message_store.transcript_store.session_dir)
-        if self.session_memory_store is not None:
-            session_memory_store = SessionMemoryStore(
-                message_store.transcript_store.session_dir
-            )
         bind_result_store = getattr(self.tool_executor, "bind_result_store", None)
         if callable(bind_result_store):
             bind_result_store(result_store)
         if self.compaction_service is not None:
             self.compaction_service.bind_runtime(
                 message_store=message_store,
-                session_memory_store=session_memory_store,
                 result_store=result_store,
+                current_model_context=self.current_model_context,
             )
         file_state_cache = file_state_cache or FileStateCache()
         bind_file_state_cache = getattr(self.tool_executor, "bind_file_state_cache", None)
@@ -151,27 +134,8 @@ class CliRuntime:
                 workspace=self.workspace,
                 reader=attachment_collector.reader,
                 file_state_cache=file_state_cache,
+                checkpoint_store=self.checkpoint_store,
                 shared_sources=attachment_collector.shared_sources,
-            )
-        session_memory_extractor = self.session_memory_extractor
-        if session_memory_store is not None and self.subagent_runner is not None:
-            session_memory_extractor = SessionMemoryExtractionService(
-                session_memory_store,
-                subagent_runner=self.subagent_runner,
-                trace_recorder=self.trace_recorder,
-            )
-            bind_extractor = getattr(
-                self.compaction_service,
-                "bind_session_memory_extractor",
-                None,
-            )
-            if callable(bind_extractor):
-                bind_extractor(session_memory_extractor)
-        session_memory_updater = self.session_memory_updater
-        if session_memory_store is not None:
-            session_memory_updater = SessionMemoryUpdater(
-                session_memory_store,
-                trace_recorder=self.trace_recorder,
             )
         context_engine = ContextEngine(
             message_store,
@@ -188,6 +152,7 @@ class CliRuntime:
                     self.long_term_memory_store,
                     self.memory_selector,
                     inner=self.compaction_service,
+                    trace_recorder=self.trace_recorder,
                 )
                 if self.long_term_memory_store is not None
                 and self.memory_selector is not None
@@ -204,16 +169,6 @@ class CliRuntime:
             current_model_context=self.current_model_context,
             hooks=self.hooks,
             compaction_service=self.compaction_service,
-            session_memory_extractor=(
-                BackgroundSessionMemoryExtractor(
-                    session_memory_extractor,
-                    self.background_task_manager,
-                )
-                if session_memory_extractor is not None
-                and self.background_task_manager is not None
-                else session_memory_extractor
-            ),
-            session_memory_updater=session_memory_updater,
             error_log_recorder=self.error_log_recorder,
         )
         if self.permission_store is not None:
@@ -225,18 +180,18 @@ class CliRuntime:
             state=state,
             message_store=message_store,
             loop=loop,
-            session_memory_store=session_memory_store or self.session_memory_store,
-            session_memory_extractor=session_memory_extractor,
-            session_memory_updater=session_memory_updater,
             attachment_collector=attachment_collector,
             plan_store=self.plan_store,
             user_question_prompter=self.user_question_prompter,
+            checkpoint_store=self.checkpoint_store,
         )
 
     def with_model_config(self) -> "CliRuntime":
         """Reload `.env` provider settings while preserving the active session."""
 
-        model_client = create_model_client(self.workspace / ".env")
+        model_client = create_model_client(
+            self.provider_config_path or self.workspace / ".env"
+        )
         config = model_client.config
         current_model_context = self.current_model_context or CurrentModelContext()
         current_model_context.snapshot = None
@@ -276,19 +231,6 @@ class CliRuntime:
                 permission_policy=self.permission_policy,
             )
 
-        session_memory_extractor = self.session_memory_extractor
-        if self.session_memory_store is not None and subagent_runner is not None:
-            session_memory_extractor = SessionMemoryExtractionService(
-                self.session_memory_store,
-                subagent_runner=subagent_runner,
-                trace_recorder=self.trace_recorder,
-            )
-        session_memory_updater = self.session_memory_updater
-        if self.session_memory_store is not None:
-            session_memory_updater = SessionMemoryUpdater(
-                self.session_memory_store,
-                trace_recorder=self.trace_recorder,
-            )
         long_term_memory_extractor = self.long_term_memory_extractor
         if self.long_term_memory_store is not None and subagent_runner is not None:
             long_term_memory_extractor = LongTermMemoryExtractionService(
@@ -302,9 +244,9 @@ class CliRuntime:
                 )
 
         if self.compaction_service is not None:
-            self.compaction_service.bind_runtime(subagent_runner=subagent_runner)
             self.compaction_service.bind_runtime(
-                session_memory_extractor=session_memory_extractor
+                model_client=model_client,
+                current_model_context=current_model_context,
             )
 
         context_engine = ContextEngine(
@@ -322,6 +264,7 @@ class CliRuntime:
                     self.long_term_memory_store,
                     memory_selector,
                     inner=self.compaction_service,
+                    trace_recorder=self.trace_recorder,
                 )
                 if self.long_term_memory_store is not None
                 else self.compaction_service
@@ -346,6 +289,7 @@ class CliRuntime:
                 error_log_recorder=self.error_log_recorder,
                 result_store=result_store,
                 file_state_cache=file_state_cache,
+                checkpoint_store=self.checkpoint_store,
             )
 
         loop = AgentLoop(
@@ -358,16 +302,6 @@ class CliRuntime:
             current_model_context=current_model_context,
             hooks=self.hooks,
             compaction_service=self.compaction_service,
-            session_memory_extractor=(
-                BackgroundSessionMemoryExtractor(
-                    session_memory_extractor,
-                    self.background_task_manager,
-                )
-                if session_memory_extractor is not None
-                and self.background_task_manager is not None
-                else session_memory_extractor
-            ),
-            session_memory_updater=session_memory_updater,
             error_log_recorder=self.error_log_recorder,
         )
         return replace(
@@ -380,8 +314,6 @@ class CliRuntime:
             tool_executor=tool_executor,
             current_model_context=current_model_context,
             subagent_runner=subagent_runner,
-            session_memory_extractor=session_memory_extractor,
-            session_memory_updater=session_memory_updater,
             long_term_memory_extractor=long_term_memory_extractor,
             memory_selector=memory_selector,
             plan_store=self.plan_store,

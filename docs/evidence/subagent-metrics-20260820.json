@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "evaluation_status": "blocked_provider",
+  "output_dir": "C:\\Users\\刘\\Desktop\\Nervure-Traces\\subagent-evaluation-20260820-070620",
+  "harbor": {
+    "version": "0.21.0",
+    "commit": "64afbbcb62165950301e1a6407c729aa26d844ff"
+  },
+  "repository": {
+    "revision": "f0e9cec8ae103049efdb57ca082960f242d58c1f",
+    "dirty": true
+  },
+  "model": {
+    "provider": "custom",
+    "model": "mimo-v2.5-pro-1m"
+  },
+  "dataset": {
+    "name": "nervure-medium-coding",
+    "case_count": 8,
+    "buggy_fixture_fail": "8/8",
+    "oracle_pass": "8/8",
+    "hidden_verifier_isolated": true,
+    "instruction_leak": false
+  },
+  "phase1": {
+    "planned_order": ["A_OFF_r1", "B_ON_r1", "B_ON_r2", "A_OFF_r2"],
+    "concurrency": 4,
+    "executed": [
+      {
+        "label": "A_OFF_r1",
+        "switch": "NERVURE_DISABLE_SUBAGENT=1",
+        "trials": 8,
+        "reward_pass": 0,
+        "infrastructure_errors": 8,
+        "atif_valid": 8,
+        "model_call_lifecycles": 8,
+        "provider_attempts": 80,
+        "input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "tool_calls": 0,
+        "child_count": 0,
+        "avg_duration_ms": 186458.952625,
+        "provider_failure": {
+          "http_status": 503,
+          "message": "No available channel for model mimo-v2.5-pro-1m",
+          "retry_per_trial": 10
+        }
+      }
+    ],
+    "not_executed": ["B_ON_r1", "B_ON_r2", "A_OFF_r2"],
+    "ab_comparison_valid": false
+  },
+  "offline_harness": {
+    "subagent_off_schema_prompt_hidden": true,
+    "subagent_on_schema_prompt_preserved": true,
+    "fork_targeted_tests": "pass",
+    "background_targeted_tests": "pass",
+    "full_pytest": "751 passed",
+    "compileall": "pass"
+  },
+  "phase2": {
+    "status": "not_run",
+    "reason": "No valid ON Explore adoption sample because provider was unavailable."
+  }
+}

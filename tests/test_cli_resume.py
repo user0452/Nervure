@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_messages_path, sessions_dir
+from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
 from services.context.message_store import MessageStore
 from services.tools.executor import ToolExecutionUpdate
 from services.tools.file_state import FileStateCache
@@ -126,7 +126,7 @@ def test_resolve_resume_target_rejects_legacy_session_path(tmp_path: Path) -> No
     try:
         resolve_resume_target(tmp_path, str(legacy_path))
     except ValueError as exc:
-        assert ".onecode/sessions" in str(exc)
+        assert "Nervure session storage" in str(exc)
     else:
         raise AssertionError("legacy .onecode/<session-id> path should be rejected")
 

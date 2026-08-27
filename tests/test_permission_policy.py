@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_tool_results_dir
+from infrastructure.filesystem.nervure_paths import session_tool_results_dir
 from services.guard import SandboxBoundary, SandboxGuard
 from services.permissions import (
     PermissionPolicy,
@@ -250,7 +250,7 @@ def test_project_ask_rule_keeps_tool_visible_but_requests_permission(
     assert "Project permission settings" in decision.reason
 
 
-def test_memory_directory_write_does_not_ask_for_protected_onecode_dir(
+def test_memory_directory_write_does_not_ask_for_protected_nervure_dir(
     tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
@@ -261,13 +261,37 @@ def test_memory_directory_write_does_not_ask_for_protected_onecode_dir(
     descriptor = write_file_descriptor()
     guard = SandboxGuard(SandboxBoundary(cwd=workspace))
     runtime = ToolRuntime(state=state, guard=guard)
-    tool_input = {"file_path": ".onecode/memory/user.md", "content": "memory"}
+    tool_input = {"file_path": ".nervure/memory/user.md", "content": "memory"}
     classification = descriptor.classify_input(tool_input, runtime)
 
     decision = policy.evaluate(
         tool_call=ToolCall(id="call-1", name="write_file", input=tool_input),
         descriptor=descriptor,
         classification=classification,
+        guard_policies=(guard.check_write_target(tool_input["file_path"]),),
+        state=state,
+    )
+
+    assert decision.action == "allow"
+
+
+def test_legacy_memory_directory_write_remains_compatible(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = ProjectPermissionSettingsStore(workspace / ".nervure" / "settings.json")
+    policy = PermissionPolicy(project_store=store)
+    state = RuntimeState()
+    descriptor = write_file_descriptor()
+    guard = SandboxGuard(SandboxBoundary(cwd=workspace))
+    runtime = ToolRuntime(state=state, guard=guard)
+    tool_input = {"file_path": ".onecode/memory/user.md", "content": "memory"}
+
+    decision = policy.evaluate(
+        tool_call=ToolCall(id="call-legacy-memory", name="write_file", input=tool_input),
+        descriptor=descriptor,
+        classification=descriptor.classify_input(tool_input, runtime),
         guard_policies=(guard.check_write_target(tool_input["file_path"]),),
         state=state,
     )
@@ -336,13 +360,13 @@ def test_long_term_memory_extraction_agent_can_only_write_memory_markdown(
     state = RuntimeState()
     state.metadata["long_term_memory_extraction_agent"] = True
     state.metadata["allowed_memory_dir"] = str(
-        (workspace / ".onecode" / "memory").resolve()
+        (workspace / ".nervure" / "memory").resolve()
     )
     descriptor = write_file_descriptor()
     guard = SandboxGuard(SandboxBoundary(cwd=workspace))
     runtime = ToolRuntime(state=state, guard=guard)
 
-    allowed_input = {"file_path": ".onecode/memory/topic.md", "content": "memory"}
+    allowed_input = {"file_path": ".nervure/memory/topic.md", "content": "memory"}
     allowed = policy.evaluate(
         tool_call=ToolCall(id="call-1", name="write_file", input=allowed_input),
         descriptor=descriptor,
@@ -350,7 +374,7 @@ def test_long_term_memory_extraction_agent_can_only_write_memory_markdown(
         guard_policies=(guard.check_write_target(allowed_input["file_path"]),),
         state=state,
     )
-    denied_input = {"file_path": ".onecode/settings.json", "content": "{}"}
+    denied_input = {"file_path": ".nervure/settings.json", "content": "{}"}
     denied = policy.evaluate(
         tool_call=ToolCall(id="call-2", name="write_file", input=denied_input),
         descriptor=descriptor,

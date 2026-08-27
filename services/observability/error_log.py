@@ -16,7 +16,7 @@ from pathlib import Path
 from threading import RLock, Timer
 from typing import Any, Protocol
 
-from services.errors import onecode_error_details, short_error_stack
+from services.errors import nervure_error_details, short_error_stack
 from services.observability.sanitize import sanitize_attributes
 
 MAX_STACK_CHARS = 4000
@@ -154,7 +154,7 @@ class ErrorLogRecorder:
         source: str,
         attributes: Mapping[str, Any] | None = None,
     ) -> None:
-        details = onecode_error_details(error)
+        details = nervure_error_details(error)
         record = {
             "timestamp": self._timestamp(),
             "session_id": self.session_id,

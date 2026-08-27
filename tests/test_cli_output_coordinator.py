@@ -201,7 +201,7 @@ def test_second_flush_is_noop_until_more_commits_are_queued() -> None:
 def test_status_line_accepts_rich_text() -> None:
     buffer = _captured_console()
     coord = TerminalOutputCoordinator()
-    coord.queue_status_line(Text("cancelled", style="onecode.warning"))
+    coord.queue_status_line(Text("cancelled", style="nervure.warning"))
     asyncio.run(coord.flush_ready_checkpoints())
     assert "cancelled" in buffer.getvalue()
 

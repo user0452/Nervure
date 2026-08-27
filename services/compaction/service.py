@@ -3,42 +3,37 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, Protocol
+from time import perf_counter
+from typing import Any
 
 from core.runtime_state import RuntimeState
-from services.compaction.session_memory import SessionMemoryStore
-from services.compaction.token_estimator import estimate_messages_tokens
+from services.compaction.token_estimator import (
+    estimate_messages_tokens,
+    estimate_snapshot_tokens,
+)
 from services.compaction.types import (
     CompactionConfig,
     CompactionResult,
     CompactionTrigger,
 )
 from services.context.message_store import MessageStore
+from services.context.current_model_context import CurrentModelContext
 from services.context.projector import ContextProjector
-from services.context.snapshot import PreparedContext
+from services.context.snapshot import ContextSnapshot, PreparedContext
 from services.hooks import HookEvent, HookRegistry
+from services.model.client import ModelClient
+from services.model.stream import ModelStreamEvent
 from services.model.types import ProviderError
 from services.observability import TraceRecorder
-from services.subagents.types import SubagentRequest
 from utils.toolResultStorage import ToolResultStorage
-
-if TYPE_CHECKING:
-    from services.subagents.runner import SubagentRunner
 
 MICROCOMPACT_PLACEHOLDER = (
     "[Old tool result content cleared. Re-read the referenced file or rerun the "
     "tool if exact output is needed.]"
 )
-
-
-class SubagentRunnerProtocol(Protocol):
-    async def run(self, request: SubagentRequest): ...
-
-
-class SessionMemoryExtractorProtocol(Protocol):
-    async def wait_for_current_extraction(self, state: RuntimeState) -> None: ...
 
 
 class ContextCompactionService:
@@ -47,19 +42,17 @@ class ContextCompactionService:
         *,
         config: CompactionConfig | None = None,
         message_store: MessageStore | None = None,
-        session_memory_store: SessionMemoryStore | None = None,
-        session_memory_extractor: SessionMemoryExtractorProtocol | None = None,
         result_store: ToolResultStorage | None = None,
-        subagent_runner: SubagentRunnerProtocol | None = None,
+        model_client: ModelClient | None = None,
+        current_model_context: CurrentModelContext | None = None,
         hooks: HookRegistry | None = None,
         trace_recorder: TraceRecorder | None = None,
     ) -> None:
         self.config = config or CompactionConfig()
         self._message_store = message_store
-        self._session_memory_store = session_memory_store
-        self._session_memory_extractor = session_memory_extractor
         self._result_store = result_store
-        self._subagent_runner = subagent_runner
+        self._model_client = model_client
+        self._current_model_context = current_model_context
         self._hooks = hooks or HookRegistry()
         self._trace_recorder = trace_recorder or TraceRecorder.noop()
 
@@ -67,27 +60,18 @@ class ContextCompactionService:
         self,
         *,
         message_store: MessageStore | None = None,
-        session_memory_store: SessionMemoryStore | None = None,
-        session_memory_extractor: SessionMemoryExtractorProtocol | None = None,
         result_store: ToolResultStorage | None = None,
-        subagent_runner: SubagentRunnerProtocol | None = None,
+        model_client: ModelClient | None = None,
+        current_model_context: CurrentModelContext | None = None,
     ) -> None:
         if message_store is not None:
             self._message_store = message_store
-        if session_memory_store is not None:
-            self._session_memory_store = session_memory_store
-        if session_memory_extractor is not None:
-            self._session_memory_extractor = session_memory_extractor
         if result_store is not None:
             self._result_store = result_store
-        if subagent_runner is not None:
-            self._subagent_runner = subagent_runner
-
-    def bind_session_memory_extractor(
-        self,
-        session_memory_extractor: SessionMemoryExtractorProtocol | None,
-    ) -> None:
-        self._session_memory_extractor = session_memory_extractor
+        if model_client is not None:
+            self._model_client = model_client
+        if current_model_context is not None:
+            self._current_model_context = current_model_context
 
     async def prepare(
         self,
@@ -174,14 +158,6 @@ class ContextCompactionService:
             },
         )
         try:
-            memory_result = await self._try_session_memory_compact(
-                messages,
-                state,
-                trigger=CompactionTrigger.AUTO_SESSION_MEMORY,
-            )
-            if memory_result is not None:
-                _reset_auto_compact_failures(state)
-                return memory_result
             full_result = await self._full_compact(
                 messages,
                 state,
@@ -232,13 +208,6 @@ class ContextCompactionService:
     ) -> CompactionResult:
         messages = self._active_messages()
         try:
-            memory_result = await self._try_session_memory_compact(
-                messages,
-                state,
-                trigger=CompactionTrigger.REACTIVE,
-            )
-            if memory_result is not None:
-                return memory_result
             return await self._full_compact(
                 messages,
                 state,
@@ -260,59 +229,6 @@ class ContextCompactionService:
             raise RuntimeError("compaction requires a bound MessageStore")
         return self._message_store.current_messages()
 
-    async def _try_session_memory_compact(
-        self,
-        messages: tuple[dict[str, Any], ...],
-        state: RuntimeState,
-        *,
-        trigger: CompactionTrigger,
-    ) -> CompactionResult | None:
-        if self._session_memory_store is None:
-            return None
-        if self._session_memory_extractor is not None:
-            await self._session_memory_extractor.wait_for_current_extraction(state)
-        memory = self._session_memory_store.read()
-        if memory is None or memory.is_empty:
-            return None
-        token_before = estimate_messages_tokens(messages)
-        boundary_id = _boundary_id()
-        hook_metadata = await self._pre_compact(
-            state,
-            trigger=trigger,
-            token_before=token_before,
-            message_count=len(messages),
-        )
-        tail = self._recent_tail_for_session_memory(messages)
-        compacted = _compact_messages(
-            trigger=trigger,
-            boundary_id=boundary_id,
-            summary=memory.content,
-            tail=tail,
-            source="session_memory",
-        )
-        token_after = estimate_messages_tokens(compacted)
-        if token_after >= self.config.auto_compact_threshold_tokens:
-            return None
-        stored = self._replace_active_messages(
-            compacted,
-            trigger=trigger,
-            boundary_id=boundary_id,
-            metadata={**hook_metadata, "source": "session_memory"},
-        )
-        result = CompactionResult(
-            trigger=trigger,
-            messages=tuple(stored),
-            token_before=token_before,
-            token_after=token_after,
-            metadata={
-                "boundary_id": boundary_id,
-                "source": "session_memory",
-                "session_memory_path": str(self._session_memory_store.path),
-            },
-        )
-        await self._post_compact(state, result, messages_before=len(messages))
-        return result
-
     async def _full_compact(
         self,
         messages: tuple[dict[str, Any], ...],
@@ -321,8 +237,7 @@ class ContextCompactionService:
         trigger: CompactionTrigger,
         focus: str | None = None,
     ) -> CompactionResult:
-        if self._subagent_runner is None:
-            raise RuntimeError("full compact requires a SubagentRunner")
+        started = perf_counter()
         token_before = estimate_messages_tokens(messages)
         boundary_id = _boundary_id()
         hook_metadata = await self._pre_compact(
@@ -336,29 +251,35 @@ class ContextCompactionService:
             focus=focus,
             extra_instructions=hook_metadata.get("summary_instructions"),
         )
+        parent_snapshot = await self._compact_parent_snapshot(messages, state)
+        compact_snapshot = _append_compact_instruction(
+            parent_snapshot,
+            prompt,
+            max_output_tokens=self.config.compact_summary_reserve_tokens,
+        )
+        projected_tokens = _estimate_snapshot_input_tokens(compact_snapshot)
         self._trace_recorder.event(
-            "compact_start",
+            "compact_triggered",
             {
                 "trigger": trigger.value,
-                "token_before": token_before,
-                "message_count": len(messages),
+                "context_window_tokens": self.config.context_window_tokens,
+                "trigger_ratio": self.config.compact_trigger_ratio,
+                "trigger_tokens": self.config.compact_trigger_tokens,
+                "projected_tokens_before": projected_tokens,
             },
         )
-        result = await self._subagent_runner.run(
-            SubagentRequest(
-                prompt=prompt,
-                subagent_type=None,
-                parent_session_id=state.session_id,
-                parent_tool_call_id=f"compact-{boundary_id}",
-                metadata={"query_source": "compact", "trigger": trigger.value},
-            )
+        self._trace_recorder.event(
+            "compact_request",
+            {
+                "trigger": trigger.value,
+                "parent_snapshot_message_count": len(parent_snapshot.messages),
+                "compact_request_message_count": len(compact_snapshot.messages),
+                "estimated_input_tokens": projected_tokens,
+                "requested_max_output_tokens": self.config.compact_summary_reserve_tokens,
+            },
         )
-        if result.is_error:
-            raise RuntimeError(result.final_text)
-        summary = _extract_summary(result.final_text)
-        tail = ContextProjector(max_messages=min(20, self.config.snip_max_messages)).project(
-            messages,
-        )
+        summary, usage = await self._request_compact_summary(compact_snapshot)
+        tail = self._recent_tail(messages)
         compacted = _compact_messages(
             trigger=trigger,
             boundary_id=boundary_id,
@@ -381,43 +302,96 @@ class ContextCompactionService:
             metadata={
                 "boundary_id": boundary_id,
                 "source": "full",
-                "subagent_session_id": result.session_id,
+                "summary_output_tokens": usage.output_tokens if usage else 0,
+                "recent_tail_tokens": estimate_messages_tokens(tail),
+                "compacted_context_tokens": token_after,
+                "compression_ratio": (
+                    token_after / token_before if token_before else 0.0
+                ),
             },
         )
         await self._post_compact(state, compaction_result, messages_before=len(messages))
+        self._trace_recorder.event(
+            "compact_completed",
+            {
+                "trigger": trigger.value,
+                "summary_output_tokens": usage.output_tokens if usage else 0,
+                "recent_tail_tokens": estimate_messages_tokens(tail),
+                "compacted_context_tokens": token_after,
+                "compression_ratio": (
+                    token_after / token_before if token_before else 0.0
+                ),
+                **_usage_metadata(usage),
+                "duration_ms": round((perf_counter() - started) * 1000, 3),
+            },
+        )
         return compaction_result
 
-    def _recent_tail_for_session_memory(
+    async def _compact_parent_snapshot(
+        self,
+        messages: tuple[dict[str, Any], ...],
+        state: RuntimeState,
+    ) -> ContextSnapshot:
+        if self._current_model_context is not None:
+            snapshot = self._current_model_context.snapshot_copy()
+            if snapshot is not None:
+                return snapshot
+        # Safe startup/recovery fallback: use cheap projected messages and no
+        # synthetic system/tools. The normal path always prefers the real
+        # parent request snapshot for prompt-cache reuse.
+        prepared = await self.prepare_for_model(messages, state)
+        return ContextSnapshot(system_prompt="", messages=prepared.messages)
+
+    async def _request_compact_summary(
+        self,
+        snapshot: ContextSnapshot,
+    ) -> tuple[str, Any | None]:
+        if self._model_client is None:
+            raise RuntimeError("full compact requires a bound ModelClient")
+        completed: ModelStreamEvent | None = None
+        async for event in self._model_client.stream(snapshot):
+            if event.type == "error":
+                raise RuntimeError(event.text or "compact model request failed")
+            if event.type == "message_completed":
+                completed = event
+        if completed is None:
+            raise RuntimeError("compact model request returned no completed message")
+        tool_calls = completed.metadata.get("tool_calls")
+        if tool_calls:
+            raise RuntimeError("compact model request returned tool calls")
+        if completed.output_interrupted:
+            raise RuntimeError("compact model request output was interrupted")
+        summary = _extract_summary(completed.final_text)
+        if not summary:
+            raise RuntimeError("compact model request returned an empty summary")
+        return summary, completed.usage
+
+    def _recent_tail(
         self,
         messages: tuple[dict[str, Any], ...],
     ) -> tuple[dict[str, Any], ...]:
         selected: list[dict[str, Any]] = []
         token_count = 0
-        text_count = 0
         for message in reversed(messages):
             projected = deepcopy(message)
             next_tokens = estimate_messages_tokens([projected])
-            if (
-                selected
-                and token_count + next_tokens > self.config.session_memory_max_tokens
-                and text_count >= self.config.session_memory_min_text_messages
-            ):
+            if selected and token_count + next_tokens > self.config.recent_tail_budget_tokens:
                 break
             selected.insert(0, projected)
             token_count += next_tokens
-            if message.get("role") in {"user", "assistant"}:
-                text_count += 1
-            if (
-                token_count >= self.config.session_memory_min_tokens
-                and text_count >= self.config.session_memory_min_text_messages
-            ):
+            if token_count >= self.config.recent_tail_budget_tokens:
                 break
-        tail = tuple(selected)
-        start_index = max(0, len(messages) - len(tail))
+        start_index = max(0, len(messages) - len(selected))
         adjusted = ContextProjector().adjust_start_index_to_preserve_tool_pairs(
             messages,
             start_index,
         )
+        # Keep the user message that started the newest turn whenever the
+        # token budget cuts into an assistant/tool exchange.  This may add a
+        # small amount beyond the nominal tail budget, but avoids leaving the
+        # model with an orphaned tool exchange or no task anchor.
+        while adjusted > 0 and messages[adjusted].get("role") != "user":
+            adjusted -= 1
         return tuple(deepcopy(message) for message in messages[adjusted:])
 
     def _replace_active_messages(
@@ -434,15 +408,6 @@ class ContextCompactionService:
             messages,
             reason=trigger.value,
             metadata={"boundary_id": boundary_id, **metadata},
-        )
-        self._trace_recorder.event(
-            "compact_completed",
-            {
-                "trigger": trigger.value,
-                "boundary_id": boundary_id,
-                "messages_after": len(stored),
-                "token_after": estimate_messages_tokens(stored),
-            },
         )
         return stored
 
@@ -666,6 +631,55 @@ def _prepared_context_from_result(result: CompactionResult) -> PreparedContext:
     )
 
 
+def _append_compact_instruction(
+    snapshot: ContextSnapshot,
+    instruction: str,
+    *,
+    max_output_tokens: int,
+) -> ContextSnapshot:
+    """Append one user instruction while preserving the parent's prefix."""
+
+    usage_hints = deepcopy(snapshot.usage_hints)
+    request_overrides = dict(usage_hints.get("request_overrides") or {})
+    request_overrides["max_output_tokens"] = max_output_tokens
+    usage_hints["request_overrides"] = request_overrides
+    messages = tuple(deepcopy(snapshot.messages)) + (
+        {
+            "role": "user",
+            "content": instruction,
+            "metadata": {"is_compact_instruction": True},
+        },
+    )
+    return replace(snapshot, messages=messages, usage_hints=usage_hints)
+
+
+def _estimate_snapshot_input_tokens(snapshot: ContextSnapshot) -> int:
+    """Estimate provider-visible input without counting output reserve hints."""
+
+    return estimate_snapshot_tokens(
+        replace(snapshot, usage_hints={}, transcript_refs=())
+    )
+
+
+def _usage_metadata(usage: Any | None) -> dict[str, int]:
+    if usage is None:
+        return {}
+    return {
+        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+        "cache_read_input_tokens": int(
+            getattr(usage, "cache_read_input_tokens", 0) or 0
+        ),
+        "uncached_input_tokens": int(
+            max(
+                0,
+                (getattr(usage, "input_tokens", 0) or 0)
+                - (getattr(usage, "cache_read_input_tokens", 0) or 0),
+            )
+        ),
+        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+    }
+
+
 def _compact_messages(
     *,
     trigger: CompactionTrigger,
@@ -712,18 +726,22 @@ def _compact_prompt(
     instructions = str(extra_instructions).strip() if extra_instructions else ""
     focus_text = focus.strip() if isinstance(focus, str) and focus.strip() else ""
     lines = [
-        "Compact the current session into a concise continuation summary.",
-        "Do not call tools. Return only text.",
+        "Compact the current conversation into a high-information continuation state.",
+        "Do not call tools. This is one text-only summarization request; return only the summary.",
+        "The system prompt, tool definitions/schemas, fixed harness instructions, "
+        "and runtime-injected instruction/long-term memory content are input prefix "
+        "only and must not be copied into the summary.",
+        "Do not summarize unrelated chatter, full tool results, shell logs, or hidden reasoning.",
         "Include these sections:",
-        "- User Requests And Intent",
-        "- Key Technical Concepts",
-        "- Files And Code",
-        "- Errors And Fixes",
-        "- Problem Solving Process",
-        "- All User Messages Summary",
-        "- Pending Work",
-        "- Current Work",
-        "- Next Step",
+        "# Task",
+        "# Current State",
+        "# Important Decisions",
+        "# Files",
+        "# Code / Architecture",
+        "# Errors / Findings",
+        "# Verification",
+        "# User Constraints",
+        "# Next Step",
     ]
     if focus_text:
         lines.append(f"Focus: {focus_text}")

@@ -1,8 +1,8 @@
 # Tech Debt Tracker
 
-最近审阅日期：2026-06-08
+最近审阅日期：2026-08-19
 
-本台账记录当前已实现的 OneCode runtime 骨架中可由代码证据支持的技术债。条目依据 `architecture.md`、`docs/design-docs/core-beliefs.md`、`docs/exec-plans/active/` 和当前代码边界整理。
+本台账记录当前已实现的 Nervure runtime 骨架中可由代码证据支持的技术债。条目依据 `architecture.md`、`docs/design-docs/core-beliefs.md`、`docs/exec-plans/active/` 和当前代码边界整理。
 
 ## 活跃技术债
 
@@ -165,6 +165,71 @@ UI 渲染不能成为附件投影或安全判断的事实来源；guard、permis
 ---
 
 ## 已解决条目归档
+
+### TD-022: Full Compact metrics 曾读取请求前估算而非真实 provider usage
+
+- **解决方式：** `compact_request` 只计请求次数并带 trigger；Full Compact 的 input/cache-read/uncached/output/duration 改由 `compact_completed` 真实 usage 提供，失败由 `compact_failed` 单独记录，micro compact 不混入 Full Compact 数值。
+- **验证：** `tests/test_eval_metrics.py`；真实 live evidence 见 `docs/evidence/v1-metrics.json` 的 `full_compact`。
+
+### TD-023: Harbor Agent image 运行时缺少 ripgrep
+
+- **解决方式：** ripgrep 在 Harbor agent image 构建阶段安装，不再在每个 trial 运行阶段临时安装。
+- **验证：** Oracle/NOP 与 repo-understanding trace 中 `ripgrep_not_found=0`；证据见 `docs/evidence/v1-evidence.md`。
+
+### TD-024: 工具生命周期统计把同一调用重复计数
+
+- **解决方式：** eval 分析器以唯一 `tool_call_id` 为调用单位，合并 `tool_preflight`、`tool_execution`、`tool_result` 生命周期。
+- **验证：** `tests/test_understanding_analysis.py` 与 Harbor corrected factorial 汇总；工具 runtime 约束见 `docs/design-docs/tool-runtime-architecture.md`。
+
+### TD-025: broad search 暴露生成目录和嵌套 VCS/runtime 噪声
+
+- **解决方式：** grep 使用 `!**/<dir>/**` 过滤嵌套目录；glob 用 `os.walk` 剪枝；显式 `path` 仍可检查被排除根。裸 `cache` 过于宽泛，默认排除改为明确的 `.cache`。
+- **验证：** `tests/test_search_tools.py`（15 passed），覆盖 nested exclusion、explicit root、普通隐藏/config 文件与 prompt/schema 顺序。
+
+### TD-026: provider streaming 缺少整次模型调用墙钟截止
+
+- **解决方式：** 新增 provider-neutral `services/model/deadline.py`，默认 `model_call_timeout_seconds=300`，独立于 HTTP transport timeout；超时关闭底层 async iterator，抛不可重试 `timeout_error`，并记录 deadline/elapsed/partial progress metadata。
+- **验证：** `tests/test_model_call_deadline.py`（7 passed），覆盖 endless stream、正常完成、partial text/tool、取消关闭、retry、trace 与配置。
+
+### TD-027: root-worktree sandbox 会错误信任文件系统根目录
+
+- **解决方式：** `SandboxBoundary` 现在把 Windows drive root（例如 `C:\`）和 POSIX `/` 统一识别为不安全 worktree，构造时丢弃该值，避免 git worktree 查询失败时把整个盘符纳入 allow。
+- **验证：** `tests/test_path_sandbox_guard.py` 覆盖通用根路径、Windows `C:\` 回归及外部路径仍为 `ask`。
+
+### TD-028: `.onecode` → `.nervure` 迁移测试契约不一致
+
+- **解决方式：** 当前产品路径测试统一使用 `.nervure`；已有 `.onecode/sessions/` 和 `.onecode/memory/` 兼容行为保留为显式 legacy 测试。CLI resume suggestions 现在同时扫描 primary 与 legacy session roots。
+- **验证：** migration、permission、resume、memory、background task 相关测试与全量 suite 均通过。
+
+### TD-029: provider catalog 缺少设计承诺的 Claude OpenAI-compatible 条目
+
+- **解决方式：** 恢复 `claude-openai-compatible` 内置定义，标记 `requires_base_url=True`，不假设 Claude 原生 Anthropic endpoint；连接顺序、配置测试和 provider 架构文档同步。
+- **验证：** provider catalog/config/connection tests 通过。
+
+### TD-030: FileStateCache 仅依赖 mtime 导致快速编辑误判
+
+- **解决方式：** `changed_text_files()` 直接比较当前文本内容；mtime 仅保留为状态 metadata，不再作为唯一 change detector。
+- **验证：** 新增同大小、恢复相同 mtime 的快速编辑回归测试，无 sleep；全量 suite 通过。
+
+### TD-031: Subagent eval 指标使用旧事件名并把 child usage 算入 Main
+
+- **解决方式：** `evals.metrics.NervureTraceAnalyzer` 改用真实的
+  `subagent_start`/`subagent_completed`/`subagent_error` 事件，并通过
+  `agent` tool span 到 child `interaction` 的 lineage 拆分
+  `main_agent`、`child_agent` 和 `total`；同时输出每个 child 的类型、
+  fork/read-only、duration、usage、tool errors。新增
+  `NERVURE_DISABLE_SUBAGENT`（以及 `NERVURE_DISABLE_AGENT_TOOL`）OFF
+  开关，直接跳过 descriptor 注册，避免 schema/prompt 仍暴露后再 deny。
+- **验证：** `tests/test_eval_metrics.py`、
+  `tests/test_subagent_eval_controls.py`、`tests/test_eval_integration.py`；
+  真实旧 trace 重新解析后 Main/Child/Total 数值可加和。
+
+## V1 freeze 残余风险
+
+- 模型仍可能在 deadline 到期前继续探索；wall-clock 只限制慢调用生命周期，不判断语义完成，也不替模型决定何时停止。
+- repo_map 只有四个 sanity trial，adoption `1/4`，read_file 下降只是方向性证据，尚不足以强制注入或宣称稳定收益。
+- symbol_search 在 exact probe 上 adoption `4/4` 且 correctness 无回归，但尚未验证更大样本的 latency/performance margin。
+- 工作树仍有用户既有 dirty 修改；本轮没有 reset、checkout、clean、revert 或提交。
 
 ### TD-018: Skill `allowed_tools` 会转成共享 session 级工具授权
 

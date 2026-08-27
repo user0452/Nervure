@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import (
+from infrastructure.filesystem.nervure_paths import (
     session_dir,
     session_messages_path,
     sessions_dir,

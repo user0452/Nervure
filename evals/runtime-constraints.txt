@@ -1,0 +1,12 @@
+# Harbor eval runtime constraints.
+# Keep benchmark dependency resolution stable without changing Nervure's normal
+# development dependency policy. MCP is intentionally pinned to the v1 API
+# line used by the current services/mcp implementation.
+httpx==0.28.1
+mcp==1.28.1
+pydantic==2.13.4
+rich==15.0.0
+python-dotenv==1.2.3
+tree-sitter==0.26.0
+tree-sitter-bash==0.25.1
+prompt-toolkit==3.0.52

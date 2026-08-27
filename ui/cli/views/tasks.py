@@ -33,7 +33,7 @@ def render_tasks(
         durable_error=durable_error,
     )
     background = _background_tasks_table(runtime, tuple(background_tasks))
-    return titled_section("Tasks", Group(durable, Text(), background), style="onecode.info")
+    return titled_section("Tasks", Group(durable, Text(), background), style="nervure.info")
 
 
 def _durable_tasks_table(
@@ -45,11 +45,11 @@ def _durable_tasks_table(
     durable_error: str | None,
 ) -> object:
     if durable_error is not None:
-        return Text(f"{SYMBOLS.error} Durable tasks: {durable_error}", style="onecode.error")
+        return Text(f"{SYMBOLS.error} Durable tasks: {durable_error}", style="nervure.error")
     if task_list_id is None:
-        return Text(f"{SYMBOLS.info} Durable tasks: disabled", style="onecode.subtle")
+        return Text(f"{SYMBOLS.info} Durable tasks: disabled", style="nervure.subtle")
     items = [task for task in tasks if task.metadata.get("_internal") is not True]
-    table = Table(title="Durable tasks", box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(title="Durable tasks", box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("id", no_wrap=True)
     table.add_column("status")
     table.add_column("subject")
@@ -84,7 +84,7 @@ def _background_tasks_table(
     runtime: CliRuntime,
     tasks: tuple[BackgroundTaskState, ...],
 ) -> object:
-    table = Table(title="Background tasks", box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(title="Background tasks", box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("id")
     table.add_column("type")
     table.add_column("status")

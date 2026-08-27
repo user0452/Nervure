@@ -1,10 +1,10 @@
 # Tool Design Guidelines
 
-本文定义 OneCode 新增工具时应遵守的 metadata、schema、权限目标、结果记录和测试约定。它是设计约定，不是某个工具的实现计划。具体实现步骤需要写入 `docs/exec-plans/active/` 中的 ExecPlan。
+本文定义 Nervure 新增工具时应遵守的 metadata、schema、权限目标、结果记录和测试约定。它是设计约定，不是某个工具的实现计划。具体实现步骤需要写入 `docs/exec-plans/active/` 中的 ExecPlan。
 
 ## 目标
 
-OneCode 的工具不应只是一个函数。工具 descriptor 必须携带足够的结构化信息，让 runtime 可以动态组装模型可见 schema、注入工具 prompt、执行输入校验、做 deny-first 权限裁剪、分批并发执行、治理大结果、记录 trace，并为后续 UI 或 SDK 暴露稳定数据。
+Nervure 的工具不应只是一个函数。工具 descriptor 必须携带足够的结构化信息，让 runtime 可以动态组装模型可见 schema、注入工具 prompt、执行输入校验、做 deny-first 权限裁剪、分批并发执行、治理大结果、记录 trace，并为后续 UI 或 SDK 暴露稳定数据。
 
 新增工具不得要求修改 `core/loop.py`。工具能力必须通过 `ToolRegistry`、`RegistryToolExecutor`、guard、hook、prompt assembler 和 context/result services 接入。
 
@@ -54,7 +54,7 @@ ToolDescriptor(
 - `name`: snake_case，唯一，作为 registry key 和 provider-visible function name。
 - `description`: 一句话短描述，只进入 provider tool schema，不承载复杂使用规则。
 - `input_schema`: JSON Schema object，必须关闭不需要的 `additionalProperties`。
-- `output_schema`: OneCode 内部工具结果对象 schema；模型可见内容仍由 provider adapter 或 result projector 转换。
+- `output_schema`: Nervure 内部工具结果对象 schema；模型可见内容仍由 provider adapter 或 result projector 转换。
 - `prompt`: 工具使用规则、约束和必要示例，由 prompt assembler 从 registry 汇总。
 - `search_hint`: 未来 deferred tool search 的短能力提示，3 到 10 个词，不能替代 description。
 - `classify_input`: 根据本次 input 返回 `ToolCallClassification`。
@@ -226,7 +226,7 @@ Returns:
 
 ## Internal Tool Call Record
 
-OneCode 内部应保留 provider-neutral 工具调用记录。Provider adapter 可以将其投影为 OpenAI-compatible、Anthropic-compatible 或其他 wire format。
+Nervure 内部应保留 provider-neutral 工具调用记录。Provider adapter 可以将其投影为 OpenAI-compatible、Anthropic-compatible 或其他 wire format。
 
 工具调用记录建议字段：
 
@@ -241,7 +241,7 @@ OneCode 内部应保留 provider-neutral 工具调用记录。Provider adapter �
 | `timestamp` | runtime 自动生成 | ISO 8601 时间戳。 |
 | `parent_uuid` | 上一条消息 UUID | 消息链。 |
 
-`message.id` 可保留 provider 原始 ID；OneCode 内部链路使用 `uuid`。
+`message.id` 可保留 provider 原始 ID；Nervure 内部链路使用 `uuid`。
 
 ## Internal Tool Result Record
 
@@ -249,7 +249,7 @@ OneCode 内部应保留 provider-neutral 工具调用记录。Provider adapter �
 
 | 字段 | 来源 | 说明 |
 |:---|:---|:---|
-| `role` | `"tool_result"` | OneCode 内部消息角色。Provider adapter 可投影为需要的 wire role。 |
+| `role` | `"tool_result"` | Nervure 内部消息角色。Provider adapter 可投影为需要的 wire role。 |
 | `tool_call_id` | 对应 `tool_use.id` | 关联到工具请求。 |
 | `tool_name` | descriptor name | 工具名称。 |
 | `content` | result projector | 模型可见文本结果、预览或引用。 |

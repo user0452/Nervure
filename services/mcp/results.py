@@ -1,4 +1,4 @@
-"""Convert MCP tool results into OneCode tool result content."""
+"""Convert MCP tool results into Nervure tool result content."""
 
 from __future__ import annotations
 

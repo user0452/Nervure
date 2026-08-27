@@ -12,12 +12,12 @@ from ui.cli.views.common import titled_section
 
 def render_connect_success(provider_name: str, model: str) -> Group:
     table = Table.grid(padding=(0, 2))
-    table.add_column(style="onecode.subtle", no_wrap=True)
+    table.add_column(style="nervure.subtle", no_wrap=True)
     table.add_column()
     table.add_row("provider", provider_name)
     table.add_row("model", model)
-    return titled_section(f"{SYMBOLS.success} Connected", table, style="onecode.success")
+    return titled_section(f"{SYMBOLS.success} Connected", table, style="nervure.success")
 
 
 def render_connect_cancelled() -> Text:
-    return Text("Connect cancelled.", style="onecode.subtle")
+    return Text("Connect cancelled.", style="nervure.subtle")

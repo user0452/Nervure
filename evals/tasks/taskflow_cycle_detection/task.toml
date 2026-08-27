@@ -1,0 +1,39 @@
+schema_version = "1.4"
+artifacts = [
+  "/workspace",
+  "/logs/agent/nervure/trace.jsonl",
+  "/logs/agent/nervure/trajectory.json",
+  "/logs/agent/nervure/nervure_metrics.json",
+  "/logs/agent/nervure/atif_validation.json",
+  "/logs/agent/nervure/git_diff.patch",
+  "/logs/agent/nervure/task_metadata.json",
+  "/logs/agent/nervure/nervure_report.md",
+]
+
+[task]
+name = "nervure-medium-coding/taskflow_cycle_detection"
+version = "0.1.0"
+description = "Detect indirect dependency cycles regardless of insertion order."
+keywords = ["python", "debugging", "coding-agent", "bugfix", "dag", "cycle"]
+
+[metadata]
+difficulty = "medium"
+category = "software"
+tags = ["bugfix", "dag", "cycle"]
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 120.0
+environment_mode = "separate"
+
+[environment]
+network_mode = "public"
+cpus = 2
+memory_mb = 2048
+
+[verifier.environment]
+network_mode = "no-network"
+cpus = 1
+memory_mb = 1024

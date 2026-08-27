@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_messages_path, sessions_dir
+from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
 from services.context.message_store import MessageStore
 from services.context.snapshot import ContextSnapshot
 from services.guard import SandboxBoundary, SandboxGuard
@@ -153,14 +153,36 @@ def test_fork_subagent_inherits_parent_prompt_and_messages(tmp_path: Path) -> No
             "content": [{"type": "tool_use", "id": "call-agent", "name": "agent"}],
         }
     )
+    rendered_messages = (
+        {"role": "user", "content": "rendered parent context"},
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "rendered answer"}],
+        },
+    )
+    rendered_tools = (
+        {
+            "name": "parent_only",
+            "description": "parent-only tool",
+            "input_schema": {"type": "object"},
+        },
+    )
     current_context = CurrentModelContext(
-        ContextSnapshot(system_prompt="EXACT_PARENT_PROMPT", messages=())
+        ContextSnapshot(
+            system_prompt="EXACT_PARENT_PROMPT",
+            messages=rendered_messages,
+            tool_schemas=rendered_tools,
+        )
     )
     runner, model, _parent_store, _policy = make_runner(
         tmp_path,
         [LLMResponse(assistant_message=assistant("fork done"), final_text="fork done")],
         parent_store=parent_store,
         current_context=current_context,
+        base_descriptors=(
+            dummy_descriptor("read_file"),
+            dummy_descriptor("agent"),
+        ),
     )
 
     result = run(
@@ -176,13 +198,91 @@ def test_fork_subagent_inherits_parent_prompt_and_messages(tmp_path: Path) -> No
 
     assert result.metadata["is_fork"] is True
     assert model.snapshots[0].system_prompt == "EXACT_PARENT_PROMPT"
-    assert model.snapshots[0].messages[0]["content"] == "parent context"
-    assert model.snapshots[0].messages[2]["content"] == (
-        "Fork started - processing in child agent"
+    assert model.snapshots[0].messages[:2] == rendered_messages
+    assert [
+        schema["function"]["name"] for schema in model.snapshots[0].tool_schemas
+    ] == ["read_file"]
+    assert all(
+        message.get("content") != "parent context"
+        for message in model.snapshots[0].messages
     )
     assert "continue from here" in model.snapshots[0].messages[-1]["content"]
     assert parent_store.current_messages()[-1]["role"] == "assistant"
     assert not session_messages_path(tmp_path, result.session_id).exists()
+
+
+def test_fork_without_snapshot_falls_back_to_directive_only(tmp_path: Path) -> None:
+    runner, model, parent_store, _policy = make_runner(
+        tmp_path,
+        [LLMResponse(assistant_message=assistant("fork done"), final_text="fork done")],
+    )
+    parent_store.append_user("do not leak this transcript")
+
+    result = run(
+        runner.run(
+            SubagentRequest(
+                prompt="run the small delegated task",
+                subagent_type=None,
+                parent_session_id="parent-session",
+                parent_tool_call_id="call-agent",
+            )
+        )
+    )
+
+    assert result.is_error is False
+    assert model.snapshots[0].messages == (
+        {"role": "user", "content": "run the small delegated task"},
+    )
+    assert all(
+        message.get("content") != "do not leak this transcript"
+        for message in model.snapshots[0].messages
+    )
+
+
+def test_fork_snapshot_is_copied_before_child_context_is_built(tmp_path: Path) -> None:
+    original = {
+        "role": "user",
+        "content": {"text": "stable", "nested": {"keep": True}},
+    }
+    schema = {
+        "name": "read_file",
+        "input_schema": {"properties": {"path": {"type": "string"}}},
+    }
+    current_context = CurrentModelContext(
+        ContextSnapshot(
+            system_prompt="PARENT_PROMPT",
+            messages=(original,),
+            tool_schemas=(schema,),
+        )
+    )
+    runner, model, _parent_store, _policy = make_runner(
+        tmp_path,
+        [LLMResponse(assistant_message=assistant("fork done"), final_text="fork done")],
+        current_context=current_context,
+    )
+
+    result = run(
+        runner.run(
+            SubagentRequest(
+                prompt="continue",
+                subagent_type=None,
+                parent_session_id="parent-session",
+                parent_tool_call_id="call-agent",
+            )
+        )
+    )
+
+    assert result.is_error is False
+    model.snapshots[0].messages[0]["content"]["nested"]["keep"] = False
+    assert model.snapshots[0].tool_schemas == ()
+    assert current_context.snapshot is not None
+    assert current_context.snapshot.messages[0]["content"]["nested"]["keep"] is True
+    assert (
+        current_context.snapshot.tool_schemas[0]["input_schema"]["properties"]["path"][
+            "type"
+        ]
+        == "string"
+    )
 
 
 def test_fork_subagent_does_not_create_resumable_session(tmp_path: Path) -> None:

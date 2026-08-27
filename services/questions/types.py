@@ -1,7 +1,7 @@
 """Types for the structured user-question prompter.
 
 The prompter protocol is intentionally narrow: it takes a list of questions
-with options and returns either a list of ``AnswerRecord`` entries or a single
+with selectable options or free text and returns ``AnswerRecord`` entries or a single
 ``declined=True`` response. The model never sees raw exception text; tools
 translate the response into a normal ``ToolExecutionResult``.
 """
@@ -27,7 +27,7 @@ class QuestionRequest:
 
     question: str
     header: str
-    options: tuple[QuestionOption, ...]
+    options: tuple[QuestionOption, ...] = ()
     multi_select: bool = False
 
 

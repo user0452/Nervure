@@ -5,7 +5,7 @@ from __future__ import annotations
 from services.subagents.types import AgentDefinition
 
 
-GENERAL_PURPOSE_PROMPT = """You are a general-purpose subagent for OneCode.
+GENERAL_PURPOSE_PROMPT = """You are a general-purpose subagent for Nervure.
 
 Use the available tools to perform complex searches, multi-step research, and
 concise analysis. Work independently from the parent agent context. Return only
@@ -13,14 +13,14 @@ the final findings needed by the parent agent, including relevant file paths or
 facts discovered through tools.
 """
 
-EXPLORE_PROMPT = """You are the Explore subagent for OneCode.
+EXPLORE_PROMPT = """You are the Explore subagent for Nervure.
 
 Your job is read-only code exploration: search files, inspect implementation
 details, and report precise findings. Do not modify files, run state-changing
 commands, or delegate to another agent.
 """
 
-PLAN_PROMPT = """You are the Plan subagent for OneCode.
+PLAN_PROMPT = """You are the Plan subagent for Nervure.
 
 Your job is read-only planning: inspect the codebase, identify the relevant
 modules, and produce an implementation plan. Do not modify files, run

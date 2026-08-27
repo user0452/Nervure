@@ -14,6 +14,7 @@ Prefer instead:
 Rules:
 - Patterns are matched against paths relative to the selected search path.
 - Results include files only, sorted by newest modification time first.
+- Broad scans skip common VCS, runtime-state, cache, and build directories; select an excluded directory explicitly with `path` when you need it.
 - Use `path` to narrow the search root and `offset` / `head_limit` to page through many matches.
 
 Returns:

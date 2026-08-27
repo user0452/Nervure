@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_dir, session_messages_path, session_tool_results_dir
+from infrastructure.filesystem.nervure_paths import session_dir, session_messages_path, session_tool_results_dir
 from utils.toolResultStorage import ToolResultStorage
 from services.guard import SandboxBoundary, SandboxGuard
 from services.permissions import PermissionPolicy
@@ -36,7 +36,7 @@ def _execute_results(
 
 
 def test_result_store_persists_content_and_formats_reference(tmp_path) -> None:
-    store = ToolResultStorage(tmp_path / ".onecode" / "session-1")
+    store = ToolResultStorage(tmp_path / ".nervure" / "session-1")
 
     ref = store.persist_tool_result(
         tool_call_id="call/1",
@@ -53,7 +53,7 @@ def test_result_store_persists_content_and_formats_reference(tmp_path) -> None:
 
 
 def test_result_store_reuses_same_reference_for_same_content(tmp_path) -> None:
-    store = ToolResultStorage(tmp_path / ".onecode" / "session-1")
+    store = ToolResultStorage(tmp_path / ".nervure" / "session-1")
 
     first = store.persist_tool_result(
         tool_call_id="call-1",
@@ -71,7 +71,7 @@ def test_result_store_reuses_same_reference_for_same_content(tmp_path) -> None:
 
 
 def test_result_store_uses_stable_hash_suffix_for_changed_content(tmp_path) -> None:
-    store = ToolResultStorage(tmp_path / ".onecode" / "session-1")
+    store = ToolResultStorage(tmp_path / ".nervure" / "session-1")
 
     first = store.persist_tool_result(
         tool_call_id="call-1",

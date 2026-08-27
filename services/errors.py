@@ -42,7 +42,7 @@ class ErrorDetails:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class OneCodeError(Exception):
+class NervureError(Exception):
     """Base class for classified runtime errors."""
 
     def __init__(
@@ -62,12 +62,16 @@ class OneCodeError(Exception):
         self.metadata = dict(metadata or {})
 
 
-class AbortError(OneCodeError):
+# Backward-compatible public alias for integrations using the old project name.
+OneCodeError = NervureError
+
+
+class AbortError(NervureError):
     def __init__(self, message: str = "Operation aborted.") -> None:
         super().__init__(message, category=ErrorCategory.ABORT, safe_message=message)
 
 
-class ConfigParseError(OneCodeError):
+class ConfigParseError(NervureError):
     def __init__(
         self,
         message: str,
@@ -83,7 +87,7 @@ class ConfigParseError(OneCodeError):
         )
 
 
-class ShellError(OneCodeError):
+class ShellError(NervureError):
     def __init__(
         self,
         message: str = "Shell command failed.",
@@ -107,7 +111,7 @@ class ShellError(OneCodeError):
         self.interrupted = interrupted
 
 
-class McpOperationError(OneCodeError):
+class McpOperationError(NervureError):
     def __init__(
         self,
         message: str,
@@ -125,7 +129,7 @@ class McpOperationError(OneCodeError):
         )
 
 
-class ToolRuntimeError(OneCodeError):
+class ToolRuntimeError(NervureError):
     def __init__(
         self,
         message: str,
@@ -141,7 +145,7 @@ class ToolRuntimeError(OneCodeError):
         )
 
 
-class RetryExhaustedError(OneCodeError):
+class RetryExhaustedError(NervureError):
     def __init__(
         self,
         message: str,
@@ -214,9 +218,9 @@ def is_abort_error(value: object) -> bool:
     return isinstance(value, BaseException) and type(value).__name__ == "AbortError"
 
 
-def onecode_error_details(value: object) -> ErrorDetails:
+def nervure_error_details(value: object) -> ErrorDetails:
     error = to_error(value)
-    if isinstance(error, OneCodeError):
+    if isinstance(error, NervureError):
         return ErrorDetails(
             category=error.category,
             error_type=_error_type(error),
@@ -241,6 +245,10 @@ def onecode_error_details(value: object) -> ErrorDetails:
     retryable = bool(getattr(error, "retryable", False))
     metadata = _metadata_from_error_shape(error)
     return _details(error, category, retryable=retryable, metadata=metadata)
+
+
+# Backward-compatible function alias for older integrations.
+onecode_error_details = nervure_error_details
 
 
 def _details(

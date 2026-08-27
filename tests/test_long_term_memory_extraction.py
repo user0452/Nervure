@@ -60,9 +60,9 @@ def test_extraction_runs_restricted_subagent(tmp_path):
     assert len(runner.requests) == 1
     request = runner.requests[0]
     assert request.metadata["purpose"] == "long_term_memory_extraction"
-    assert request.metadata["allowed_memory_dir"].endswith(".onecode\\memory") or request.metadata[
+    assert request.metadata["allowed_memory_dir"].endswith(".nervure\\memory") or request.metadata[
         "allowed_memory_dir"
-    ].endswith(".onecode/memory")
+    ].endswith(".nervure/memory")
     assert state.metadata["long_term_memory_extraction"]["last_status"] == "success"
 
 

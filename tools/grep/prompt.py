@@ -16,6 +16,7 @@ Rules:
 - Use `output_mode="content"` when exact matching lines and line numbers are needed.
 - Use `output_mode="count"` when comparing match counts by file.
 - Narrow broad searches with `path`, `glob`, or `type`; use `offset` and `head_limit` for large result sets.
+- Broad scans skip common VCS, runtime-state, cache, and build directories; set `path` to an excluded directory explicitly when you need to inspect it.
 - Context options are only valid with `output_mode="content"`.
 
 Returns:

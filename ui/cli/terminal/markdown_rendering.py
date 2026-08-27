@@ -536,7 +536,7 @@ def _emit_segment(segment: str, console: _Console) -> None:
     if not segment.strip():
         return
     if segment.count("```") % 2 == 1 or segment.count("~~~") % 2 == 1:
-        console.print(_RichText(segment, style="onecode.metric"))
+        console.print(_RichText(segment, style="nervure.metric"))
     else:
         console.print(_RichMarkdown(segment))
 

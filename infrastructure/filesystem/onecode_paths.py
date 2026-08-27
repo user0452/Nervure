@@ -1,4 +1,4 @@
-"""Workspace-local `.onecode` path helpers."""
+"""Legacy `.onecode` path helpers kept for backward compatibility."""
 
 from __future__ import annotations
 

@@ -71,7 +71,7 @@ def _spike_static_banner(brightness: str) -> None:
     console.print(
         Text(
             f"Detected terminal brightness: {brightness}",
-            style="onecode.subtle",
+            style="nervure.subtle",
         )
     )
     console.print(
@@ -81,8 +81,8 @@ def _spike_static_banner(brightness: str) -> None:
         )
     )
     console.print(
-        Text("onecode> ", style="onecode.title")
-        + Text("(assistant reply goes here)", style="onecode.metric")
+        Text("Nervure> ", style="nervure.title")
+        + Text("(assistant reply goes here)", style="nervure.metric")
     )
 
 
@@ -177,7 +177,7 @@ async def _run_streaming_preview(state: _SpikeState) -> None:
     """Simulate a 50ms-throttled streaming preview."""
 
     fragments: Iterable[str] = (
-        "# Hello from OneCode\n\n",
+        "# Hello from Nervure\n\n",
         "This is a *streaming* ",
         "Markdown ",
         "preview.\n\n",

@@ -27,7 +27,7 @@ def resolve_task_list_id(
     """
 
     source = os.environ if env is None else env
-    raw = source.get("ONECODE_TASK_LIST_ID")
+    raw = source.get("NERVURE_TASK_LIST_ID") or source.get("ONECODE_TASK_LIST_ID")
     if not raw:
         metadata_value = state.metadata.get("task_list_id")
         if isinstance(metadata_value, str) and metadata_value:

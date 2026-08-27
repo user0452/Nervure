@@ -48,7 +48,7 @@ async def run_batch_async(workspace: Path) -> int:
         async for event in runtime.loop.stream(line, attachments=attachments):
             if event.type == "assistant_delta":
                 if not saw_delta:
-                    print("onecode> ", end="", flush=True)
+                    print("Nervure> ", end="", flush=True)
                 saw_delta = True
                 print(renderer.render_assistant_delta(event.text), end="", flush=True)
             elif event.type == "tool_result" and event.result is not None:

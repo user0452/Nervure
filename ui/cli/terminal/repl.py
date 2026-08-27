@@ -1,24 +1,15 @@
-"""Inline REPL — the TTY entry point for the OneCode CLI.
+"""Inline REPL — the TTY entry point for the Nervure CLI.
 
-The :class:`InlineRepl` ties the static and dynamic regions together
-and drives the main loop. It is intentionally small: every visible
-behaviour lives in a dedicated module (static output, prompt input,
-streaming, transient pages) and this class is just the conductor.
+The :class:`InlineRepl` wires commands and agent events into one persistent
+``PersistentTerminalApp`` render owner. Compatibility renderers remain for
+batch/non-TTY and transient command pages, but a live TTY turn never writes
+to stdout outside that application.
 
 Loop shape::
 
-    while not done:
-        submission = prompt.read()
-        if submission.kind == CANCEL/EXIT:
-            shutdown(); break
-        echo user line into static region
-        if line starts with "/":
-            result = dispatch_command(...)
-            handle_command_result(result)
-        else:
-            await run_agent_turn(line)
-            drain queued inputs in FIFO order, each via either
-            ``_handle_command`` (slash) or ``_run_turn`` (prompt)
+    PersistentTerminalApp owns the input Buffer and submits either a slash
+    command or an agent turn; queued input is drained in FIFO order after the
+    current turn.
 
 A "turn" is one full pass through the agent loop, including any
 tool calls and queued follow-ups. ``InputQueue`` is shared with
@@ -31,6 +22,7 @@ turn finishes.
 from __future__ import annotations
 
 import asyncio
+import shlex
 import shutil
 import sys
 from typing import Awaitable, Callable
@@ -38,7 +30,7 @@ from typing import Awaitable, Callable
 from rich.console import Console
 from rich.text import Text
 
-from core.runtime_state import RuntimeState
+from core.runtime_state import InteractionKind, RuntimeState
 from services.plans import build_plan_attachments_for_state
 from ui.cli import renderer
 from ui.cli.commands import dispatch_command
@@ -49,7 +41,9 @@ from ui.cli.terminal.detect import detect_terminal_brightness
 from ui.cli.terminal.interaction_host import TerminalInteractionHost
 from ui.cli.terminal.page import TransientPage
 from ui.cli.terminal.permission_prompt import TtyPermissionPrompter
+from ui.cli.terminal.question_prompt import TtyUserQuestionPrompter
 from ui.cli.terminal.prompt_session import PromptSession, PromptSubmission, SubmissionKind
+from ui.cli.terminal.persistent_app import PersistentTerminalApp
 from ui.cli.terminal.queue import InputQueue
 from ui.cli.terminal.selector import SelectorItem, TransientSelector
 from ui.cli.terminal.static_output import print_user_submitted
@@ -61,13 +55,14 @@ from ui.cli.types import CliRuntime, CommandResult
 
 
 class InlineRepl:
-    """The TTY CLI main loop, implemented with prompt_toolkit + Rich."""
+    """The TTY CLI main loop, implemented with one prompt_toolkit app."""
 
     def __init__(
         self,
         runtime: CliRuntime,
         *,
         permission_prompter: TtyPermissionPrompter | None = None,
+        user_question_prompter: TtyUserQuestionPrompter | None = None,
         interaction_host: TerminalInteractionHost | None = None,
     ) -> None:
         self._runtime = runtime
@@ -81,10 +76,14 @@ class InlineRepl:
         self._permission_prompter = permission_prompter or TtyPermissionPrompter(
             self._interaction_host
         )
+        self._user_question_prompter = user_question_prompter or TtyUserQuestionPrompter(
+            self._interaction_host
+        )
         # Use the brightness-aware theme so foreground colors stay
         # legible against light or dark hosts. Static region only —
         # the theme never sets a background.
         self._console = Console(theme=rich_theme_for(self._brightness))
+        self._terminal_app: PersistentTerminalApp | None = None
 
     # --- public entry -----------------------------------------------------
 
@@ -101,71 +100,44 @@ class InlineRepl:
     # --- main loop --------------------------------------------------------
 
     async def _main_loop(self) -> None:
-        # Print the static banner once. ``renderer.render_banner`` is
-        # theme-agnostic so we render it through the brightness-aware
-        # console we just created.
-        self._console.print(renderer.render_banner(self._runtime))
-        self._print_untrusted_mcp_notices(self._runtime)
+        self._terminal_app = PersistentTerminalApp(
+            self._runtime,
+            interaction_host=self._interaction_host,
+            on_submit=self._handle_terminal_submission,
+            on_exit=self._shutdown_async,
+            on_cancel=self._cancel_current_turn,
+        )
+        self._terminal_app.append_banner()
         if not self._runtime.configured:
-            self._console.print(
-                Text(
-                    "⚠ 尚未配置供应商。请输入 /connect 进行配置。",
-                    style="onecode.warning",
-                )
+            self._terminal_app.append_notice(
+                "⚠ 尚未配置供应商。请输入 /connect 进行配置。"
             )
-        self._agent_running = False
-        while True:
-            submission = await self._prompt.read()
-            if submission.kind is SubmissionKind.EXIT:
-                self._shutdown()
-                return
-            if submission.kind is SubmissionKind.CANCEL:
-                # Ctrl-C on an empty prompt: just clear and keep going.
-                if self._agent_running:
-                    self._cancel_requested = True
-                continue
-            # Plain submit. ``text`` is the literal buffer (or the
-            # completion's ``replacement`` when Enter was used to
-            # accept a highlighted completion).
-            text = submission.text.strip()
-            if not text:
-                continue
-            print_user_submitted(text, brightness=self._brightness)
-            if text.startswith("/"):
-                # In unconfigured mode, only /connect and /exit are allowed.
-                if not self._runtime.configured:
-                    cmd_name = text.split()[0][1:].lower()
-                    if cmd_name not in {"connect", "exit"}:
-                        self._console.print(
-                            Text(
-                                "尚未配置供应商。请先使用 /connect 配置 API 供应商。",
-                                style="onecode.warning",
-                            )
-                        )
-                        continue
-                await self._handle_command(text)
-                if self._runtime is None:
-                    return
-                # Some commands (e.g. ``/clear``) change the runtime;
-                # ``_handle_command`` already took care of the
-                # prompt session reset, so we just keep looping.
-                continue
-            # In unconfigured mode, block all non-command input.
+        await self._terminal_app.run()
+
+    async def _handle_terminal_submission(self, text: str) -> None:
+        """Dispatch one line submitted by the persistent application."""
+
+        if self._runtime is None:
+            return
+        if text.startswith("/"):
             if not self._runtime.configured:
-                self._console.print(
-                    Text(
-                        "尚未配置供应商。请先使用 /connect 配置 API 供应商。",
-                        style="onecode.warning",
-                    )
+                command = text.split()[0][1:].lower()
+                if command not in {"connect", "exit"}:
+                    if self._terminal_app is not None:
+                        self._terminal_app.append_notice(
+                            "尚未配置供应商。请先使用 /connect 配置 API 供应商。"
+                        )
+                    return
+            await self._handle_command(text)
+            return
+        if not self._runtime.configured:
+            if self._terminal_app is not None:
+                self._terminal_app.append_notice(
+                    "尚未配置供应商。请先使用 /connect 配置 API 供应商。"
                 )
-                continue
-            await self._run_turn(text)
-            # Drain queued inputs in FIFO order. Each entry was
-            # pushed by the running-turn input box while the turn
-            # was active. Slash commands are routed to the command
-            # dispatcher; ordinary prompts go back into
-            # ``_run_turn``.
-            await self._drain_queue()
+            return
+        await self._run_turn(text)
+        await self._drain_queue()
 
     # --- command dispatch -------------------------------------------------
 
@@ -177,6 +149,8 @@ class InlineRepl:
             result = await self._run_connect_flow()
         if result.runtime is not None:
             self._runtime = result.runtime
+            if self._terminal_app is not None:
+                self._terminal_app.set_runtime(self._runtime)
             self._reset_prompt_session()
         if result.reset_main_view:
             self._reset_main_view(result.renderable)
@@ -184,6 +158,8 @@ class InlineRepl:
         if result.renderable is not None:
             if result.presentation == "page":
                 await self._show_page(result.renderable)
+            elif self._terminal_app is not None:
+                self._terminal_app.append_renderable(result.renderable)
             else:
                 self._console.print(result.renderable)
         # Replay restored history into the main scrollback after any inline
@@ -191,25 +167,35 @@ class InlineRepl:
         # already exited the alternate screen, and before the next prompt is
         # read, so historical messages land in the primary buffer.
         if result.replay_messages:
-            replay_messages_to_static(
-                result.replay_messages,
-                brightness=self._brightness,
-                workspace=self._runtime.workspace if self._runtime else None,
-            )
+            if self._terminal_app is not None:
+                self._terminal_app.append_replay_messages(result.replay_messages)
+            else:
+                replay_messages_to_static(
+                    result.replay_messages,
+                    brightness=self._brightness,
+                    workspace=self._runtime.workspace if self._runtime else None,
+                )
         if result.attachments:
             self._pending_attachments.extend(result.attachments)
         if result.should_exit:
-            self._shutdown()
+            await self._shutdown_async()
             self._runtime = None
+            if self._terminal_app is not None and self._terminal_app.app.is_running:
+                self._terminal_app.app.exit()
             return
         if result.queued_prompt:
             if not self._runtime.configured:
-                self._console.print(
-                    Text(
-                        "尚未配置供应商。请先使用 /connect 配置 API 供应商。",
-                        style="onecode.warning",
+                if self._terminal_app is not None:
+                    self._terminal_app.append_notice(
+                        "尚未配置供应商。请先使用 /connect 配置 API 供应商。"
                     )
-                )
+                else:
+                    self._console.print(
+                        Text(
+                            "尚未配置供应商。请先使用 /connect 配置 API 供应商。",
+                            style="nervure.warning",
+                        )
+                    )
                 return
             await self._run_turn(result.queued_prompt)
             await self._drain_queue()
@@ -273,6 +259,7 @@ class InlineRepl:
                     self._runtime.workspace,
                     trust_prompt=default_trust_prompt,
                     permission_prompter=self._permission_prompter,
+                    user_question_prompter=self._user_question_prompter,
                     mcp_trust_mode="prompt",
                 )
             except Exception as exc:
@@ -303,6 +290,9 @@ class InlineRepl:
         self._prompt = PromptSession(self._runtime, self._queue)
 
     def _reset_main_view(self, renderable: object | None) -> None:
+        if self._terminal_app is not None:
+            self._terminal_app.reset_main_view(renderable)
+            return
         self._push_previous_view_out()
         self._console.print(renderer.render_banner(self._runtime))
         if renderable is not None:
@@ -318,12 +308,10 @@ class InlineRepl:
     # --- agent turn -------------------------------------------------------
 
     async def _run_turn(self, line: str) -> None:
-        """Run one full agent turn with a live preview.
+        """Run one full agent turn through the persistent render owner.
 
-        We hand the agent's event stream to :class:`StreamingSession`,
-        which owns the dynamic-region preview and Esc cancellation. The
-        session commits the final Markdown to the static region and
-        returns the buffer so we can record cancellation state.
+        The compatibility ``StreamingSession`` branch is retained only for
+        direct tests/non-TTY callers that do not install a persistent app.
 
         The session shares ``self._queue`` so the user can keep
         typing into the running-turn input box while the agent is
@@ -332,15 +320,19 @@ class InlineRepl:
         """
 
         self._agent_running = True
-        session = StreamingSession(
-            workspace=self._runtime.workspace,
-            queue=self._queue,
-            runtime=self._runtime,
-            interaction_host=self._interaction_host,
-        )
         try:
             events = self._agent_events(line)
-            await session.run(events)
+            if self._terminal_app is not None:
+                self._terminal_app.begin_turn()
+                await self._terminal_app.consume_events(events)
+            else:
+                session = StreamingSession(
+                    workspace=self._runtime.workspace,
+                    queue=self._queue,
+                    runtime=self._runtime,
+                    interaction_host=self._interaction_host,
+                )
+                await session.run(events)
         except Exception as exc:
             self._runtime.error_log_recorder.record_error(
                 exc,
@@ -348,9 +340,89 @@ class InlineRepl:
                 attributes={"turn_count": self._runtime.state.turn_count},
             )
             self._runtime.error_log_recorder.flush()
-            self._console.print(renderer.render_error(str(exc)))
+            if self._terminal_app is not None:
+                self._terminal_app.append_renderable(renderer.render_error(str(exc)))
+            else:
+                self._console.print(renderer.render_error(str(exc)))
         finally:
             self._agent_running = False
+
+        if (
+            self._runtime is not None
+            and self._runtime.state.interaction is not None
+            and self._runtime.state.interaction.kind == InteractionKind.PLAN_REVIEW
+        ):
+            await self._run_plan_review()
+
+    async def _run_plan_review(self) -> None:
+        """Present the pending plan as a keyboard-driven review flow."""
+
+        if self._runtime is None:
+            return
+        interaction = self._runtime.state.interaction
+        if interaction is None or interaction.kind != InteractionKind.PLAN_REVIEW:
+            return
+
+        if self._terminal_app is not None:
+            decision = await self._interaction_host.request_plan_review(
+                summary=str(interaction.payload.get("summary", "") or ""),
+                plan_path=str(interaction.payload.get("plan_path", "") or ""),
+            )
+            if decision.action == "approve":
+                await self._handle_command("/plan approve")
+                return
+            if decision.action == "modify":
+                if decision.feedback:
+                    self._terminal_app.append_user(decision.feedback)
+                await self._handle_command(
+                    f"/plan reject {shlex.quote(decision.feedback)}"
+                )
+                return
+            await self._handle_command("/plan reject")
+            return
+
+        # Compatibility fallback for direct/non-persistent callers. The main
+        # TTY path above never enters an alternate-screen selector or nested
+        # PromptSession.
+        selector = TransientSelector(
+            "Plan ready",
+            (
+                SelectorItem(
+                    label="Approve and implement",
+                    value="approve",
+                    detail="Exit Plan mode and start implementation",
+                ),
+                SelectorItem(
+                    label="Request changes",
+                    value="modify",
+                    detail="Tell the agent what to revise in the plan",
+                ),
+                SelectorItem(
+                    label="Reject for now",
+                    value="reject",
+                    detail="Stay in Plan mode without continuing automatically",
+                ),
+            ),
+        )
+        choice = await selector.run()
+        if choice is None or choice.value == "reject":
+            await self._handle_command("/plan reject")
+            return
+        if choice.value == "approve":
+            await self._handle_command("/plan approve")
+            return
+
+        feedback_prompt = PromptSession(
+            self._runtime,
+            self._queue,
+            bottom_hint="Describe the changes you want in the plan · Ctrl-C to cancel",
+        )
+        submission = await feedback_prompt.read()
+        if submission.kind is not SubmissionKind.SUBMIT or not submission.text.strip():
+            return
+        feedback = submission.text.strip()
+        print_user_submitted(feedback, brightness=self._brightness)
+        await self._handle_command(f"/plan reject {shlex.quote(feedback)}")
 
     async def _drain_queue(self) -> None:
         """Pop queued inputs in FIFO order after a turn finishes.
@@ -372,7 +444,8 @@ class InlineRepl:
             item = self._queue.pop()
             if item is None:
                 return
-            print_user_submitted(item.text, brightness=self._brightness)
+            if self._terminal_app is not None:
+                self._terminal_app.append_user(item.text)
             if item.kind == "slash":
                 await self._handle_command(item.text)
                 if self._runtime is None:
@@ -422,9 +495,20 @@ class InlineRepl:
             self._runtime.error_log_recorder.flush()
             yield _error_event(str(exc))
 
+    def _cancel_current_turn(self) -> None:
+        """Record a user interrupt; the persistent app cancels its task."""
+
+        self._cancel_requested = True
+        if self._runtime is not None:
+            self._runtime.state.suspend(
+                InteractionKind.USER_INTERRUPT,
+                payload={"reason": "user_cancelled_turn"},
+            )
+
     # --- shutdown ---------------------------------------------------------
 
     def _shutdown(self) -> None:
+        """Synchronous shutdown used only outside an active event loop."""
         runtime = self._runtime
         if runtime is None:
             return
@@ -440,6 +524,18 @@ class InlineRepl:
                 # process exit and rely on the atexit handler to
                 # close transports.
                 pass
+
+    async def _shutdown_async(self) -> None:
+        """Flush and close transports while the TTY loop is still running."""
+
+        runtime = self._runtime
+        if runtime is None:
+            return
+        runtime.message_store.flush_transcript()
+        runtime.trace_recorder.flush()
+        runtime.error_log_recorder.flush()
+        if runtime.mcp_manager is not None:
+            await runtime.mcp_manager.close_all()
 
     def _print_untrusted_mcp_notices(self, runtime: CliRuntime) -> None:
         raw = runtime.state.metadata.get("mcp_untrusted_servers", ())

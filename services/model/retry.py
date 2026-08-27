@@ -4,7 +4,7 @@ This runner is intentionally **non-buffering**: events yielded by the
 underlying provider operation are forwarded to the caller the instant
 they arrive. The previous design collected the full attempt into a
 ``list[ModelStreamEvent]`` and only replayed it after the attempt
-finished, which prevented OneCode's UI from showing a real-time
+finished, which prevented Nervure's UI from showing a real-time
 streaming response.
 
 The new contract is:

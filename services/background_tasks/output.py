@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from infrastructure.filesystem.onecode_paths import session_background_tasks_dir
+from infrastructure.filesystem.nervure_paths import session_background_tasks_dir
 
 
 def background_task_output_dir(workspace: Path | str, session_id: str) -> Path:

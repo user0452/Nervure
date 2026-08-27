@@ -1,0 +1,49 @@
+schema_version = "1.4"
+
+artifacts = [
+  "/workspace",
+  "/logs/agent/nervure/trace.jsonl",
+  "/logs/agent/nervure/trajectory.json",
+  "/logs/agent/nervure/nervure_metrics.json",
+  "/logs/agent/nervure/atif_validation.json",
+  "/logs/agent/nervure/git_diff.patch",
+  "/logs/agent/nervure/task_metadata.json",
+  "/logs/agent/nervure/nervure_report.md",
+]
+
+[task]
+name = "nervure/nervure-eval-poc"
+version = "0.1.0"
+description = "A deterministic calculator bugfix used to validate Nervure's Harbor integration."
+authors = []
+keywords = ["nervure", "poc", "calculator", "bugfix"]
+
+[metadata]
+difficulty = "easy"
+category = "programming"
+tags = ["nervure", "poc", "hidden-verifier"]
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 1
+memory_mb = 2048
+storage_mb = 10240
+gpus = 0
+workdir = "/workspace"
+network_mode = "public"
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 120.0
+environment_mode = "separate"
+
+[verifier.environment]
+network_mode = "no-network"
+
+[verifier.env]
+
+[environment.env]
+
+[solution.env]

@@ -80,8 +80,8 @@ async def run_connect_flow(
         return ConnectFlowResult(
             cancelled=True,
             renderable=Text(
-                "请在真实终端中运行 OneCode 以配置供应商，或直接编辑 .env 文件。",
-                style="onecode.warning",
+                "请在真实终端中运行 Nervure 以配置供应商，或直接编辑 .env 文件。",
+                style="nervure.warning",
             ),
         )
 
@@ -89,7 +89,7 @@ async def run_connect_flow(
     if not options:
         return ConnectFlowResult(
             cancelled=True,
-            renderable=Text("没有可用的供应商。", style="onecode.warning"),
+            renderable=Text("没有可用的供应商。", style="nervure.warning"),
         )
 
     # ------------------------------------------------------------------
@@ -127,7 +127,7 @@ async def run_connect_flow(
     # Step 2b: API key handling — detect existing, K/R/C, or input new.
     # ------------------------------------------------------------------
     api_key: str = ""
-    env_path = runtime.workspace / ".env"
+    env_path = runtime.provider_config_path or runtime.workspace / ".env"
 
     if provider.api_key_required:
         existing_key = existing_key_for_provider(env_path, provider.id)
@@ -205,7 +205,7 @@ async def run_connect_flow(
         runtime=new_runtime,
         renderable=Text(
             f"已连接到 {new_runtime.provider_label} ({new_runtime.model})。",
-            style="onecode.success",
+            style="nervure.success",
         ),
     )
 

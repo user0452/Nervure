@@ -1,7 +1,7 @@
 """System prompt guidance for the skill tool."""
 
 PROMPT = """Purpose:
-Load and apply a visible OneCode skill by name.
+Load and apply a visible Nervure skill by name.
 
 Use when:
 - The user explicitly names a skill or invokes one with `/<name>`.

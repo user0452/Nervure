@@ -11,7 +11,7 @@ to commit the final summary.
 The architecture mirrors the reference implementation's split
 between the ``UserToolResultMessage`` container (handled by the
 framework) and the per-tool ``renderToolResultMessage`` function
-(handled by the policy). In OneCode the framework container lives in
+(handled by the policy). In Nervure the framework container lives in
 :mod:`ui.cli.terminal.static_output` (the ``⎿`` prefix) and the policy
 lives here. Tools do not get to inject their own container prefix.
 

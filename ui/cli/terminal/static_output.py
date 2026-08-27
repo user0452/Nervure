@@ -15,6 +15,11 @@ from rich.console import Console
 from rich.text import Text
 
 from ui.cli.terminal.markdown_rendering import render_cached_markdown
+from ui.cli.terminal.activity import (
+    ActivityGroup,
+    format_activity_summary,
+    format_tool_arguments,
+)
 from ui.cli.tool_renderers import (
     render_fallback_tool_result,
     render_tool_result,
@@ -93,17 +98,17 @@ def print_user_submitted(line: str, *, brightness: str) -> None:
 
 
 def assistant_prefix_style() -> str:
-    """The ``onecode>`` prefix color.
+    """The ``Nervure>`` prefix color.
 
     Uses the same accent as section titles so the prefix reads as
     part of the assistant identity, not a tool bullet.
     """
 
-    return "onecode.title"
+    return "nervure.title"
 
 
 def print_assistant_start() -> None:
-    """Print the ``onecode>`` prefix in line with the upcoming reply.
+    """Print the ``Nervure>`` prefix in line with the upcoming reply.
 
     The Markdown body that follows will start on the same row when
     Rich honors ``end=""``. We commit this prefix before streaming
@@ -112,7 +117,7 @@ def print_assistant_start() -> None:
     """
 
     static_console().print(
-        Text("onecode>", style=assistant_prefix_style())
+        Text("Nervure>", style=assistant_prefix_style())
     )
 
 
@@ -120,7 +125,7 @@ def print_assistant_markdown(text: str) -> None:
     """Commit a complete assistant reply as Markdown.
 
     Called once when streaming finishes. The function prints the
-    ``onecode>`` prefix on a fresh row, then the Markdown body. We
+    ``Nervure>`` prefix on a fresh row, then the Markdown body. We
     print the prefix here (rather than relying on a separate
     :func:`print_assistant_start` call) so callers cannot forget the
     prefix and leave the committed assistant text without an
@@ -134,7 +139,7 @@ def print_assistant_markdown(text: str) -> None:
     if not text:
         return
     static_console().print(
-        Text("onecode>", style=assistant_prefix_style())
+        Text("Nervure>", style=assistant_prefix_style())
     )
     width = static_console().width or 80
     cached_lines = render_cached_markdown(text, width=width)
@@ -154,8 +159,8 @@ def print_assistant_inline(text: str) -> None:
     """
 
     static_console().print(
-        Text("onecode> ", style=assistant_prefix_style())
-        + Text(text, style="onecode.metric")
+        Text("Nervure> ", style=assistant_prefix_style())
+        + Text(text, style="nervure.metric")
     )
 
 
@@ -170,16 +175,16 @@ def print_tool_banner_start(tool_name: str, call_id: str, arguments: dict[str, A
     rather than reusing any heavier banner widget.
     """
 
-    label = Text("● ", style="onecode.info") + Text(
-        tool_name or "tool", style="onecode.command"
+    label = Text("● ", style="nervure.info") + Text(
+        tool_name or "tool", style="nervure.command"
     )
     if call_id:
-        label += Text(f" [{call_id}]", style="onecode.subtle")
+        label += Text(f" [{call_id}]", style="nervure.subtle")
     print_static(label)
     if arguments:
-        preview = _summarize_arguments(arguments)
+        preview = format_tool_arguments(tool_name, arguments, include_key=True)
         if preview:
-            print_static(Text(f"  → {preview}", style="onecode.subtle"))
+            print_static(Text(f"  → {preview}", style="nervure.subtle"))
 
 
 def print_tool_banner_running(call_id: str) -> None:
@@ -213,7 +218,13 @@ def print_tool_result(
         line = render_tool_result(result, workspace=workspace) if workspace is not None else render_fallback_tool_result(result)
     else:
         line = render_fallback_tool_result(result)
-    print_static(Text(f"  ⎿  {line}", style="onecode.subtle"))
+    print_static(Text(f"  ⎿  {line}", style="nervure.subtle"))
+
+
+def print_activity_group(group: ActivityGroup) -> None:
+    """Commit a collapsed activity summary without tool result bodies."""
+
+    print_static(Text(format_activity_summary(group), style="nervure.info"))
 
 
 def print_untrusted_mcp_notice(name: str, detail: str) -> None:
@@ -224,41 +235,9 @@ def print_untrusted_mcp_notice(name: str, detail: str) -> None:
         Text(
             f"! Skipped untrusted MCP server: {name}{suffix}. "
             "It was not run; its tools are unavailable.",
-            style="onecode.warning",
+            style="nervure.warning",
         )
     )
-
-
-def _summarize_arguments(arguments: dict[str, Any], *, limit: int = 120) -> str:
-    """Format a tool call's input as a one-line preview.
-
-    The tool banners are visual aids; we never want to dump a full
-    multi-kilobyte argument dict into the scrollback.
-    """
-
-    parts: list[str] = []
-    for key, value in arguments.items():
-        rendered = _render_argument_value(value)
-        parts.append(f"{key}={rendered}")
-        if sum(len(part) for part in parts) > limit:
-            break
-    text = " ".join(parts)
-    if len(text) > limit:
-        return text[: limit - 1] + "…"
-    return text
-
-
-def _render_argument_value(value: Any, *, inner_limit: int = 40) -> str:
-    if isinstance(value, str):
-        compact = " ".join(value.split())
-        if len(compact) > inner_limit:
-            return f'"{compact[: inner_limit - 1]}…"'
-        return f'"{compact}"'
-    if isinstance(value, (list, tuple)):
-        return f"<{len(value)} items>"
-    if isinstance(value, dict):
-        return f"<{len(value)} keys>"
-    return str(value)
 
 
 # --- explicit init (so callers can rebuild the console) ------------------

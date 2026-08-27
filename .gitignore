@@ -7,3 +7,15 @@ __pycache__/
 *.egg-info/
 .env
 references/
+
+# Local agent/session data and evaluation run artifacts. These directories can
+# contain prompts, transcripts, paths, provider metadata, and generated logs;
+# keep them on the developer machine rather than publishing them.
+.ai-bridge/
+.nervure/*
+!.nervure/instructions.md
+!.nervure/rules/
+!.nervure/rules/**
+!.nervure/skills/
+!.nervure/skills/**
+jobs/

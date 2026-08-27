@@ -65,6 +65,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from core.stream_events import event_requires_attribution
+from ui.cli.terminal.activity import (
+    ActivityGroup,
+    ActivityToolCall,
+    activity_title,
+    explicit_activity_id,
+    format_tool_arguments,
+    has_identifying_arguments,
+    inferred_activity_title,
+)
 from ui.cli.terminal.stream_state import (
     CliStreamUiState,
     CommitKind,
@@ -112,7 +121,12 @@ def _resolve_call_id(metadata: dict[str, Any], result: Any) -> str | None:
     return None
 
 
-def _preview_tool_input(input_obj: Any, *, limit: int = 120) -> str:
+def _preview_tool_input(
+    input_obj: Any,
+    *,
+    tool_name: str = "",
+    limit: int = 120,
+) -> str:
     """Build a bounded one-line preview of a tool call's input.
 
     Mirrors ``ui.cli.terminal.static_output._summarize_arguments``
@@ -122,29 +136,12 @@ def _preview_tool_input(input_obj: Any, *, limit: int = 120) -> str:
 
     if not isinstance(input_obj, dict):
         return ""
-    parts: list[str] = []
-    for key, value in input_obj.items():
-        rendered = _preview_value(value)
-        parts.append(f"{key}={rendered}")
-        if sum(len(part) for part in parts) > limit:
-            break
-    text = " ".join(parts)
-    if len(text) > limit:
-        return text[: max(limit - 1, 0)] + "…"
-    return text
-
-
-def _preview_value(value: Any, *, inner_limit: int = 40) -> str:
-    if isinstance(value, str):
-        compact = " ".join(value.split())
-        if len(compact) > inner_limit:
-            return f'"{compact[: inner_limit - 1]}…"'
-        return f'"{compact}"'
-    if isinstance(value, (list, tuple)):
-        return f"<{len(value)} items>"
-    if isinstance(value, dict):
-        return f"<{len(value)} keys>"
-    return str(value)
+    return format_tool_arguments(
+        tool_name,
+        input_obj,
+        include_key=True,
+        limit=limit,
+    )
 
 
 def _set_mode(state: CliStreamUiState, mode: str) -> None:
@@ -327,6 +324,24 @@ def queue_assistant_checkpoint(
     return commit
 
 
+def _queue_activity_checkpoint(
+    state: CliStreamUiState,
+    group: ActivityGroup,
+) -> StaticCommit:
+    """Stage one collapsed activity checkpoint for a completed group."""
+
+    commit = StaticCommit(
+        sequence=state.next_sequence(),
+        kind=CommitKind.ACTIVITY_GROUP,
+        payload=group,
+        model_turn_index=group.model_turn_index,
+        assistant_call_id=group.assistant_call_id,
+    )
+    state.pending_static_commits.append(commit)
+    group.committed = True
+    return commit
+
+
 def reduce_stream_event(state: CliStreamUiState, event: "AgentEvent") -> None:
     """Fold one :class:`AgentEvent` into ``state`` in place.
 
@@ -387,20 +402,56 @@ def reduce_stream_event(state: CliStreamUiState, event: "AgentEvent") -> None:
             return
         tool_call_id = str(raw_call_id)
         input_obj = getattr(tool_call, "input", None) or {}
+        if not isinstance(input_obj, dict):
+            input_obj = {}
         existing = state.tools.get(tool_call_id)
         if existing is None:
             state.tools[tool_call_id] = StreamingToolUseState(
                 call_id=tool_call_id,
                 tool_name=tool_name or "",
                 status=ToolStatus.QUEUED,
-                input_preview=_preview_tool_input(input_obj),
+                input_preview=_preview_tool_input(input_obj, tool_name=tool_name),
             )
         else:
             if tool_name:
                 existing.tool_name = tool_name
             if not existing.input_preview:
-                existing.input_preview = _preview_tool_input(input_obj)
+                existing.input_preview = _preview_tool_input(
+                    input_obj,
+                    tool_name=tool_name,
+                )
             existing.status = ToolStatus.QUEUED
+        semantic_title = activity_title(metadata)
+        if semantic_title == "Working…":
+            semantic_title = inferred_activity_title(tool_name, input_obj)
+        semantic_id = explicit_activity_id(metadata) or semantic_title
+        group = state.activity_groups.setdefault(
+            call_id,
+            ActivityGroup(
+                assistant_call_id=call_id,
+                model_turn_index=turn_index,
+                title=semantic_title,
+                activity_id=semantic_id,
+            ),
+        )
+        if group.title == "Working…":
+            group.title = semantic_title
+        if not group.activity_id:
+            group.activity_id = semantic_id
+        if not any(tool.call_id == tool_call_id for tool in group.tools):
+            group.tools.append(
+                ActivityToolCall(
+                    call_id=tool_call_id,
+                    tool_name=tool_name or "tool",
+                    arguments=dict(input_obj),
+                )
+            )
+        # Show the first-level activity as soon as the model has emitted a
+        # useful tool call. Waiting until ``tool_started`` made the dynamic
+        # region appear empty during the most important part of a real TTY
+        # turn (and some fast tools never exposed that intermediate frame).
+        if has_identifying_arguments(tool_name, input_obj):
+            state.activity_enabled = True
         # 记录工具声明顺序和所属 assistant message。
         state.tool_call_to_assistant_call_id[tool_call_id] = call_id
         _next_declared_index(state, tool_call_id)
@@ -431,6 +482,19 @@ def reduce_stream_event(state: CliStreamUiState, event: "AgentEvent") -> None:
             existing.status = ToolStatus.RUNNING
             if tool_name and not existing.tool_name:
                 existing.tool_name = tool_name
+        activity_tool = next(
+            (
+                tool
+                for group in state.activity_groups.values()
+                for tool in group.tools
+                if tool.call_id == tool_call_id
+            ),
+            None,
+        )
+        if activity_tool is not None:
+            activity_tool.started = True
+            if has_identifying_arguments(activity_tool.tool_name, activity_tool.arguments):
+                state.activity_enabled = True
         _set_mode(state, StreamMode.TOOL_RUNNING)
         return
 
@@ -473,11 +537,28 @@ def reduce_stream_event(state: CliStreamUiState, event: "AgentEvent") -> None:
                 # 让它能被后面到达的 result 正常释放。
                 declared_index = _next_declared_index(state, tool_call_id)
         state.tools.pop(tool_call_id, None)
+        activity_group = state.activity_group_for_tool(tool_call_id)
+        if activity_group is not None:
+            activity_tool = next(
+                tool
+                for tool in activity_group.tools
+                if tool.call_id == tool_call_id
+            )
+            activity_tool.result_is_error = (
+                bool(getattr(result, "is_error", False)) if result is not None else None
+            )
         bucket = state.completed_tool_results_by_assistant.setdefault(
             call_id, {}
         )
         bucket[declared_index] = result
         release_ready_tool_result_commits(state, call_id)
+        if (
+            activity_group is not None
+            and state.activity_enabled
+            and activity_group.complete
+            and not activity_group.committed
+        ):
+            _queue_activity_checkpoint(state, activity_group)
         if state.has_active_tools():
             _set_mode(state, StreamMode.TOOL_RUNNING)
         else:

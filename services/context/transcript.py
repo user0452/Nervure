@@ -33,7 +33,7 @@ class JsonlTranscriptStore:
     """按 session 将内部消息缓冲并定时追加写入 JSONL。
 
     参数:
-    - root_dir: 会话根目录，通常是项目根目录下的 `.onecode/sessions`。
+    - root_dir: 会话根目录，通常是项目根目录下的 `.nervure/sessions`；旧 `.onecode/sessions` 仍可恢复。
     - session_id: 当前运行时会话 UUID，会成为子目录名。
     - cwd: 记录到 JSONL 的当前工作目录；不传时使用当前进程目录。
     - flush_interval_seconds: 自动 flush 的间隔；测试可调用 `flush()` 立即落盘。

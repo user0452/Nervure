@@ -22,7 +22,7 @@ from services.permissions.types import (
 )
 from services.tools.types import ToolCall, ToolCallClassification, ToolDescriptor
 
-PROTECTED_PROJECT_DIRS = (".git", ".vscode", ".idea", ".onecode")
+PROTECTED_PROJECT_DIRS = (".git", ".vscode", ".idea", ".nervure", ".onecode")
 _WINDOWS_FORM_RE = re.compile(
     r"^(?:[a-zA-Z]:[\\/]|/[a-zA-Z](?:/|$)|/[a-zA-Z]:(?:/|$)|"
     r"/mnt/[a-zA-Z](?:/|$)|/cygdrive/[a-zA-Z](?:/|$)|\\\\)"
@@ -179,19 +179,23 @@ class PermissionPolicy:
                 metadata={"project_rules": _rule_strings(project_deny)},
             )
 
-        if state.metadata.get("memory_extraction_agent") is True:
-            return self._memory_extraction_decision(
-                descriptor=descriptor,
-                classification=classification,
-                guard_policies=guard_policies,
-                state=state,
-            )
         if state.metadata.get("long_term_memory_extraction_agent") is True:
             return self._long_term_memory_extraction_decision(
                 descriptor=descriptor,
                 classification=classification,
                 guard_policies=guard_policies,
                 state=state,
+            )
+
+        # Full access bypasses only interactive approval prompts. Hard deny
+        # boundaries above this point still win and cannot be overridden.
+        if state.permission_mode == PermissionMode.FULL_ACCESS:
+            return PermissionDecision(
+                action="allow",
+                reason="Full-access mode auto-approved the tool call.",
+                source="full_access",
+                targets=classification.targets,
+                guard_policies=guard_policies,
             )
 
         asks = self._ask_reasons(
@@ -361,7 +365,7 @@ class PermissionPolicy:
                 targets=classification.targets,
                 guard_policies=guard_policies,
             )
-        # The plan file lives in ``.onecode/plans/<slug>.md``. We compare
+        # New plan files live in ``.nervure/plans/<slug>.md``; legacy resumed plans
         # the normalized path of every write target against that expected
         # path; anything else is denied.
         targets = classification.targets
@@ -377,6 +381,9 @@ class PermissionPolicy:
             )
         workspace = _workspace_from_plan_state(state)
         expected_path = (
+            workspace / ".nervure" / "plans" / f"{expected}.md"
+        ).resolve() if workspace is not None else None
+        legacy_expected_path = (
             workspace / ".onecode" / "plans" / f"{expected}.md"
         ).resolve() if workspace is not None else None
         for target in targets:
@@ -387,7 +394,7 @@ class PermissionPolicy:
                 normalized = resolve_path(raw)
             except Exception:
                 normalized = Path(raw)
-            if expected_path is None or normalized != expected_path:
+            if expected_path is None or normalized not in {expected_path, legacy_expected_path}:
                 return PermissionDecision(
                     action="deny",
                     reason=(
@@ -400,69 +407,6 @@ class PermissionPolicy:
                     guard_policies=guard_policies,
                 )
         return None
-
-    def _memory_extraction_decision(
-        self,
-        *,
-        descriptor: ToolDescriptor,
-        classification: ToolCallClassification,
-        guard_policies: tuple[GuardPolicy, ...],
-        state: RuntimeState,
-    ) -> PermissionDecision:
-        """Hard-limit internal memory agents to one Markdown write target."""
-
-        allowed_path = state.metadata.get("allowed_memory_path")
-        if not isinstance(allowed_path, str) or not allowed_path:
-            return PermissionDecision(
-                action="deny",
-                reason="Memory extraction agent has no allowed memory path.",
-                source="memory_extraction_agent",
-                targets=classification.targets,
-                guard_policies=guard_policies,
-            )
-        if descriptor.name != "edit_file":
-            return PermissionDecision(
-                action="deny",
-                reason="Memory extraction agent can only use edit_file.",
-                source="memory_extraction_agent",
-                targets=classification.targets,
-                guard_policies=guard_policies,
-            )
-        normalized_allowed = resolve_path(Path(allowed_path))
-        targets = classification.targets
-        if len(targets) != 1:
-            return PermissionDecision(
-                action="deny",
-                reason="Memory extraction edit must target exactly one file.",
-                source="memory_extraction_agent",
-                targets=targets,
-                guard_policies=guard_policies,
-            )
-        target = targets[0]
-        if target.kind != "file" or target.operation != "write":
-            return PermissionDecision(
-                action="deny",
-                reason="Memory extraction edit must be a file write.",
-                source="memory_extraction_agent",
-                targets=targets,
-                guard_policies=guard_policies,
-            )
-        target_path = resolve_path(Path(target.value))
-        if target_path != normalized_allowed:
-            return PermissionDecision(
-                action="deny",
-                reason="Memory extraction agent cannot edit outside session memory.",
-                source="memory_extraction_agent",
-                targets=targets,
-                guard_policies=guard_policies,
-            )
-        return PermissionDecision(
-            action="allow",
-            reason="Memory extraction agent may edit the session memory file.",
-            source="memory_extraction_agent",
-            targets=targets,
-            guard_policies=guard_policies,
-        )
 
     def _long_term_memory_extraction_decision(
         self,
@@ -541,10 +485,14 @@ class PermissionPolicy:
                 if index < len(guard_policies)
                 else target.value
             )
-            if not is_auto_memory_markdown_path(target_path, workspace):
+            if not _is_allowed_memory_markdown_path(
+                target_path,
+                workspace=workspace,
+                allowed_memory_dir=Path(allowed_dir),
+            ):
                 return PermissionDecision(
                     action="deny",
-                    reason="Long-term memory extraction agent cannot write outside .onecode/memory Markdown files.",
+                    reason="Long-term memory extraction agent cannot write outside the configured memory Markdown directory.",
                     source="long_term_memory_extraction_agent",
                     targets=targets,
                     guard_policies=guard_policies,
@@ -840,7 +788,7 @@ def _is_session_tool_result_read(policy: GuardPolicy, state: RuntimeState) -> bo
     session_id = state.session_id
     parts = [part.lower() for part in resolve_path(policy.normalized_path).parts]
     for index, part in enumerate(parts):
-        if part != ".onecode":
+        if part not in {".nervure", ".onecode"}:
             continue
         if index + 3 >= len(parts):
             continue
@@ -865,6 +813,33 @@ def _is_long_term_memory_project_path(
     return is_auto_memory_path(policy.normalized_path, workspace)
 
 
+def _is_allowed_memory_markdown_path(
+    path: str | Path,
+    *,
+    workspace: Path,
+    allowed_memory_dir: Path,
+) -> bool:
+    """Validate an extraction write against its explicit memory root.
+
+    The extraction job carries the selected store directory. Checking that
+    directory directly keeps both current ``.nervure`` and legacy
+    ``.onecode`` stores usable during migration without allowing arbitrary
+    protected directories.
+    """
+
+    try:
+        target = resolve_path(path, base_dir=workspace)
+        memory_dir = resolve_path(allowed_memory_dir, base_dir=workspace)
+        target.relative_to(memory_dir)
+    except (OSError, ValueError):
+        return False
+    return (
+        memory_dir.name.lower() == "memory"
+        and memory_dir.parent.name.lower() in {".nervure", ".onecode"}
+        and target.suffix.lower() == ".md"
+    )
+
+
 def _workspace_from_project_store(
     project_store: ProjectPermissionSettingsStore,
 ) -> Path | None:
@@ -876,7 +851,7 @@ def _workspace_from_project_store(
 
 def _workspace_from_memory_dir(memory_dir: Path) -> Path:
     resolved = resolve_path(memory_dir)
-    if resolved.name.lower() == "memory" and resolved.parent.name.lower() == ".onecode":
+    if resolved.name.lower() == "memory" and resolved.parent.name.lower() in {".nervure", ".onecode"}:
         return resolved.parent.parent
     return resolved.parent
 

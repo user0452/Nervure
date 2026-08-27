@@ -61,7 +61,7 @@ INPUT_SCHEMA: dict[str, Any] = {
                     },
                     "multi_select": {"type": "boolean"},
                 },
-                "required": ["question", "header", "options"],
+                "required": ["question", "header"],
                 "additionalProperties": False,
             },
         },
@@ -75,8 +75,8 @@ def descriptor(prompter: "UserQuestionPrompter") -> ToolDescriptor:
     return ToolDescriptor(
         name="ask_user_question",
         description=(
-            "Ask the user one or more structured multiple-choice questions. "
-            "Use during plan mode to clarify requirements before submitting."
+            "Ask the user one or more structured selection or free-text questions when "
+            "a human decision or missing requirement is needed before continuing."
         ),
         input_schema=INPUT_SCHEMA,
         handler=_handle_for(prompter),
@@ -106,6 +106,17 @@ def _handle_for(prompter: "UserQuestionPrompter"):
                 is_error=True,
                 metadata={"error": "no_questions"},
             )
+        from core.runtime_state import InteractionKind
+
+        interaction = runtime.state.suspend(
+            InteractionKind.ASK_USER,
+            interaction_id=runtime.tool_call_id or None,
+            payload={
+                "tool_name": "ask_user_question",
+                "tool_call_id": runtime.tool_call_id,
+                "question_count": len(questions),
+            },
+        )
         try:
             response = await prompter.ask_questions(questions)
         except UserQuestionError as exc:
@@ -132,6 +143,8 @@ def _handle_for(prompter: "UserQuestionPrompter"):
                 ),
                 metadata={"status": "declined"},
             )
+        finally:
+            runtime.state.resume(interaction_id=interaction.interaction_id)
         if response.declined:
             payload = {
                 "status": "declined",
@@ -176,7 +189,7 @@ def _build_questions(raw: Any) -> tuple[QuestionRequest, ...]:
             continue
         if len(header) > MAX_HEADER_LEN:
             header = header[:MAX_HEADER_LEN]
-        options_raw = item.get("options")
+        options_raw = item.get("options", [])
         if not isinstance(options_raw, list):
             continue
         options: list[QuestionOption] = []
@@ -195,9 +208,11 @@ def _build_questions(raw: Any) -> tuple[QuestionRequest, ...]:
                     preview=str(preview) if isinstance(preview, str) else None,
                 )
             )
-        if len(options) < MIN_OPTIONS:
+        if options and len(options) < MIN_OPTIONS:
             continue
         multi_select = bool(item.get("multi_select", False))
+        if multi_select and not options:
+            continue
         questions.append(
             QuestionRequest(
                 question=question,
@@ -223,7 +238,7 @@ def _validate(tool_input: dict[str, Any], runtime: ToolRuntime) -> ValidationRes
             return ValidationResult.failure(f"questions[{index}] must be an object.")
         question = item.get("question")
         header = item.get("header")
-        options = item.get("options")
+        options = item.get("options", [])
         if not isinstance(question, str) or not question.strip():
             return ValidationResult.failure(
                 f"questions[{index}].question must be a non-empty string."
@@ -236,9 +251,17 @@ def _validate(tool_input: dict[str, Any], runtime: ToolRuntime) -> ValidationRes
             return ValidationResult.failure(
                 f"questions[{index}].header must be at most {MAX_HEADER_LEN} characters."
             )
-        if not isinstance(options, list) or len(options) < MIN_OPTIONS:
+        if not isinstance(options, list):
             return ValidationResult.failure(
-                f"questions[{index}].options must have at least {MIN_OPTIONS} entries."
+                f"questions[{index}].options must be an array when provided."
+            )
+        if options and len(options) < MIN_OPTIONS:
+            return ValidationResult.failure(
+                f"questions[{index}].options must be empty for free text or have at least {MIN_OPTIONS} entries."
+            )
+        if bool(item.get("multi_select", False)) and not options:
+            return ValidationResult.failure(
+                f"questions[{index}].multi_select requires selectable options."
             )
         if len(options) > MAX_OPTIONS:
             return ValidationResult.failure(

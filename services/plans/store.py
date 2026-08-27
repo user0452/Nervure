@@ -1,6 +1,6 @@
 """Filesystem-backed store for plan-mode Markdown files.
 
-Plan files live at ``<workspace>/.onecode/plans/<slug>.md``. The store does not
+Plan files live at ``<workspace>/.nervure/plans/<slug>.md``. The store does not
 depend on the runtime loop or any provider; it only owns pathing, slug
 generation, atomic read/write, fork copy, and resume recovery.
 """
@@ -15,7 +15,8 @@ import unicodedata
 
 from core.runtime_state import PlanState, RuntimeState
 
-DEFAULT_PLAN_DIR = ".onecode"
+DEFAULT_PLAN_DIR = ".nervure"
+LEGACY_PLAN_DIR = ".onecode"
 PLANS_SUBDIR = "plans"
 MAX_SLUG_LEN = 60
 _SLUG_INVALID = re.compile(r"[^a-z0-9_-]+")
@@ -50,11 +51,12 @@ class PlanFile:
 
 
 class PlanStore:
-    """Owns the ``.onecode/plans`` directory and per-session plan file paths."""
+    """Owns ``.nervure/plans`` with legacy ``.onecode/plans`` read fallback."""
 
     def __init__(self, workspace: Path) -> None:
         self._workspace = workspace.resolve()
         self._plans_dir = self._workspace / DEFAULT_PLAN_DIR / PLANS_SUBDIR
+        self._legacy_plans_dir = self._workspace / LEGACY_PLAN_DIR / PLANS_SUBDIR
 
     @property
     def workspace(self) -> Path:
@@ -65,7 +67,7 @@ class PlanStore:
         return self._plans_dir
 
     def ensure_layout(self) -> Path:
-        """Create ``.onecode/plans`` if missing. Idempotent."""
+        """Create ``.nervure/plans`` if missing. Idempotent."""
 
         self._plans_dir.mkdir(parents=True, exist_ok=True)
         return self._plans_dir
@@ -129,7 +131,9 @@ class PlanStore:
         self.ensure_layout()
         if not source_state.plan.plan_slug:
             raise PlanStoreError("Source plan has no slug; nothing to copy.")
-        source_path = self._plans_dir / f"{source_state.plan.plan_slug}.md"
+        source_path = _existing_plan_path(
+            self._plans_dir, self._legacy_plans_dir, source_state.plan.plan_slug
+        )
         new_slug = _random_slug()
         target_path = self._plans_dir / f"{new_slug}.md"
         if source_path.is_file():
@@ -152,12 +156,12 @@ class PlanStore:
 
         if not plan_slug:
             return None
-        if not self._plans_dir.is_dir():
+        if not self._plans_dir.is_dir() and not self._legacy_plans_dir.is_dir():
             return None
         slug = _safe_slug(plan_slug)
         if not slug:
             return None
-        path = self._plans_dir / f"{slug}.md"
+        path = _existing_plan_path(self._plans_dir, self._legacy_plans_dir, slug)
         if not path.is_file():
             return None
         state.plan.plan_slug = slug
@@ -179,6 +183,14 @@ class PlanStore:
             if suffix:
                 slug = f"{slug}-{suffix}"
         return slug[:MAX_SLUG_LEN]
+
+
+def _existing_plan_path(primary_dir: Path, legacy_dir: Path, slug: str) -> Path:
+    primary = primary_dir / f"{slug}.md"
+    legacy = legacy_dir / f"{slug}.md"
+    if primary.is_file() or not legacy.is_file():
+        return primary
+    return legacy
 
 
 def _safe_slug(text: str) -> str:

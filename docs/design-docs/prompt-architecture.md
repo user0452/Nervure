@@ -58,7 +58,7 @@ flowchart TD
 3. `engineering_practices`（固定工程行为约束：读代码、控制范围、避免过早抽象）
 4. `risk_and_safety`（固定风险与安全约束：高风险动作确认、prompt injection 防护）
 5. `verification_and_reporting`（固定验证与汇报约束：失败诊断、运行检查、如实报告）
-6. `instruction_memory`（ONECODE.md 规则，来自 `InstructionMemoryLoader`）
+6. `instruction_memory`（NERVURE.md 规则（兼容 ONECODE.md），来自 `InstructionMemoryLoader`）
 7. `long_term_memory`（MEMORY.md 索引与使用说明）
 8. `workspace_state`（cwd、工具列表、files_read）
 9. `available_tools`（可见 tool descriptor）

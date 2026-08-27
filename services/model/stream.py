@@ -11,6 +11,7 @@ from services.tools.types import ToolCall
 
 ModelStreamEventType = Literal[
     "content_delta",
+    "reasoning_delta",
     "tool_call_delta",
     "tool_call_completed",
     "message_completed",
@@ -27,6 +28,7 @@ class ModelStreamEvent:
     tool_call: ToolCall | None = None
     assistant_message: dict[str, Any] | None = None
     final_text: str = ""
+    reasoning_text: str = ""
     stop_reason: str | None = None
     usage: ModelUsage | None = None
     output_interrupted: bool = False
@@ -56,6 +58,15 @@ class ModelStreamEvent:
         return cls(type="tool_call_delta", metadata=metadata)
 
     @classmethod
+    def reasoning_delta(
+        cls,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ModelStreamEvent":
+        return cls(type="reasoning_delta", text=text, metadata=metadata or {})
+
+    @classmethod
     def tool_call_completed(
         cls,
         tool_call: ToolCall,
@@ -74,6 +85,7 @@ class ModelStreamEvent:
         *,
         assistant_message: dict[str, Any],
         final_text: str,
+        reasoning_text: str = "",
         tool_calls: tuple[ToolCall, ...] = (),
         stop_reason: str | None = None,
         usage: ModelUsage | None = None,
@@ -84,6 +96,7 @@ class ModelStreamEvent:
             type="message_completed",
             assistant_message=assistant_message,
             final_text=final_text,
+            reasoning_text=reasoning_text,
             stop_reason=stop_reason,
             usage=usage,
             output_interrupted=output_interrupted,

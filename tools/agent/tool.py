@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from services.subagents.types import SubagentRequest
+from services.subagents.profiles import get_agent_profile
 from services.tools.types import (
     ToolCallClassification,
     ToolDescriptor,
@@ -26,6 +27,7 @@ INPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "prompt": {"type": "string"},
         "subagent_type": {"type": "string"},
+        "profile": {"type": "string"},
         "run_in_background": {"type": "boolean"},
         "focus_paths": {
             "type": "array",
@@ -68,6 +70,7 @@ def _handler_for(
             SubagentRequest(
                 prompt=str(tool_input["prompt"]),
                 subagent_type=tool_input.get("subagent_type"),
+                profile=tool_input.get("profile"),
                 parent_session_id=runtime.state.session_id,
                 parent_tool_call_id=runtime.tool_call_id,
                 metadata=_child_metadata(runtime, tool_input),
@@ -218,6 +221,11 @@ def _validate(tool_input: dict[str, Any], runtime: ToolRuntime) -> ValidationRes
         not isinstance(subagent_type, str) or not subagent_type.strip()
     ):
         return ValidationResult.failure("subagent_type must be a non-empty string.")
+    profile = tool_input.get("profile")
+    if profile is not None and (not isinstance(profile, str) or get_agent_profile(profile) is None):
+        return ValidationResult.failure("profile must name a registered AgentProfile.")
+    if profile is not None and subagent_type is not None:
+        return ValidationResult.failure("Specify either profile or subagent_type, not both.")
     run_in_background = tool_input.get("run_in_background")
     if run_in_background is not None and not isinstance(run_in_background, bool):
         return ValidationResult.failure("run_in_background must be a boolean.")
@@ -249,7 +257,10 @@ def _classify_input(
         ),
     )
     return ToolCallClassification(
-        read_only=True,
+        read_only=(
+            tool_input.get("subagent_type") in {"explore", "Explore", "Plan"}
+            or tool_input.get("profile") in {"ExploreAgent", "ReviewAgent"}
+        ),
         modifies_filesystem=False,
         concurrency_safe=False,
         targets=targets,

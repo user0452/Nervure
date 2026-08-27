@@ -1,4 +1,4 @@
-"""OneCode skill loading tool."""
+"""Nervure skill loading tool."""
 
 from tools.skill.tool import descriptor
 

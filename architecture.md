@@ -1,10 +1,10 @@
-# OneCode 架构
+# Nervure 架构
 
-本文是 OneCode 的根架构说明，只保留系统级架构总览、逻辑分层、核心抽象、依赖方向和运行流程。各模块的文件职责、接口设计、数据流图、关键机制和当前边界放在 `docs/design-docs/` 的模块架构文档中。
+本文是 Nervure 的根架构说明，只保留系统级架构总览、逻辑分层、核心抽象、依赖方向和运行流程。各模块的文件职责、接口设计、数据流图、关键机制和当前边界放在 `docs/design-docs/` 的模块架构文档中。
 
 ## 项目定位
 
-OneCode 是一个 Python code agent runtime。它的核心不是 CLI wrapper，而是围绕 agent 主循环、上下文治理、工具执行、安全边界、动态 prompt、模型适配、记忆系统、子 agent、后台任务、会话记录和可观测性组成的可演化运行时。
+Nervure 是一个 Python code agent runtime。它的核心不是 CLI wrapper，而是围绕 agent 主循环、上下文治理、工具执行、安全边界、动态 prompt、模型适配、记忆系统、子 agent、后台任务、会话记录和可观测性组成的可演化运行时。
 
 架构目标：
 
@@ -21,7 +21,7 @@ OneCode 是一个 Python code agent runtime。它的核心不是 CLI wrapper，�
 
 ## 逻辑分层
 
-OneCode 在逻辑上分为六层。每一层只依赖更下层的 provider-neutral 契约，不反向依赖编排层。
+Nervure 在逻辑上分为六层。每一层只依赖更下层的 provider-neutral 契约，不反向依赖编排层。
 
 ```mermaid
 flowchart TD
@@ -84,7 +84,7 @@ flowchart TD
 | 编排 | `core/` | agent 生命周期主循环、每轮上下文重建边界、会话级运行状态、transition、对外 stream event | `core-runtime-architecture.md` |
 | 上下文 | `services/context/` | 内存消息链、JSONL transcript、模型快照、消息滑窗投影 | `context-architecture.md` |
 | 上下文 | `services/compaction/` | tool result 预算、micro/auto/manual/reactive 压缩、session memory | `compaction-architecture.md` |
-| 上下文 | `services/memory/` | 跨会话长期记忆、指令记忆（ONECODE.md）、相关记忆注入、记忆提取 | `memory-architecture.md` |
+| 上下文 | `services/memory/` | 跨会话长期记忆、指令记忆（NERVURE.md，兼容 ONECODE.md）、相关记忆注入、记忆提取 | `memory-architecture.md` |
 | 上下文 | `services/attachments/` | @mention 收集、durable attachment role、provider 可见投影 | `attachment-architecture.md` |
 | 提示 | `prompts/` | 动态 system prompt 组装、可组合 section、section 缓存 | `prompt-architecture.md` |
 | 工具 | `services/tools/` | descriptor、registry、schema 投影、executor 执行管线、并发、结果预算 | `tool-runtime-architecture.md` |
@@ -106,7 +106,7 @@ flowchart TD
 ## 当前代码模块地图
 
 ```text
-OneCode/
+Nervure/
   core/                      # 编排层
     loop.py context_engine.py runtime_state.py transitions.py stream_events.py
 
@@ -135,7 +135,7 @@ OneCode/
     toolResultStorage/       # 工具结果 artifact 命名、去重、持久化和引用文本
 
   tools/                     # 内置工具
-    read_file/ edit_file/ write_file/ glob/ grep/ bash/
+    read_file/ edit_file/ write_file/ glob/ grep/ repo_map/ bash/
     agent/ skill/
     task_create/ task_get/ task_list/ task_update/
     background_task_stop/
@@ -255,7 +255,7 @@ while running:
 
 ## 安全与上下文治理原则
 
-OneCode 的安全边界由代码路径保证，不依赖模型自觉。路径解析、guard、permission policy、工具级输入校验和 handler 兜底检查共同组成执行前安全链路。deny 是最高优先级：任何有效 deny 都同时影响模型可见能力和执行入口；hook、用户确认、session allow 和历史消息中的旧工具调用都不能覆盖 deny。hook 是扩展点，不是安全边界替代品；hook 更新输入后必须重新经过 schema validation、工具 validation、classification、guard 和 permission policy。
+Nervure 的安全边界由代码路径保证，不依赖模型自觉。路径解析、guard、permission policy、工具级输入校验和 handler 兜底检查共同组成执行前安全链路。deny 是最高优先级：任何有效 deny 都同时影响模型可见能力和执行入口；hook、用户确认、session allow 和历史消息中的旧工具调用都不能覆盖 deny。hook 是扩展点，不是安全边界替代品；hook 更新输入后必须重新经过 schema validation、工具 validation、classification、guard 和 permission policy。
 
 上下文是 agent 的受管理工作内存，不是无限聊天记录。当前已实现内存消息链、JSONL transcript、大结果外置、tool result 预算、micro/auto/manual/reactive 压缩、session memory、long-term memory 和附件投影；这些治理能力由 `ContextEngine` 与 context preparer 链编排，并通过 `ContextSnapshot` 交给 provider，不进入 `AgentLoop` 的具体分支。
 

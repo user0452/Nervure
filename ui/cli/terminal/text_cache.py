@@ -10,7 +10,7 @@ Design notes (mirroring ``docs/references/ui/components/Markdown.tsx``):
 
 - **Keyed by hash, not by content.** The original Markdown text is
   never retained in the cache; only its 16-byte blake2b digest.
-  This is intentional: OneCode can be asked to replay thousands of
+  This is intentional: Nervure can be asked to replay thousands of
   assistant messages across a long session, and storing every
   message verbatim would balloon RSS. The reference implementation
   does the same.

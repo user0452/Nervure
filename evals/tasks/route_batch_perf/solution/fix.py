@@ -1,0 +1,2 @@
+from pathlib import Path
+Path('/workspace/route_lab/batch.py').write_text('from .dijkstra import single_source, build_result\n\nclass BatchRouter:\n\n    def __init__(self, service):\n        self.service = service\n\n    def routes_from(self, source, targets, constraint=None):\n        dist, prev = single_source(self.service.graph, source, self.service.metrics, constraint)\n        return {target: build_result(source, target, dist, prev) for target in targets}\n', encoding='utf-8')

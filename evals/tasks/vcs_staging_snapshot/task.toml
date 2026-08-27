@@ -1,0 +1,39 @@
+schema_version = "1.4"
+artifacts = [
+  "/workspace",
+  "/logs/agent/nervure/trace.jsonl",
+  "/logs/agent/nervure/trajectory.json",
+  "/logs/agent/nervure/nervure_metrics.json",
+  "/logs/agent/nervure/atif_validation.json",
+  "/logs/agent/nervure/git_diff.patch",
+  "/logs/agent/nervure/task_metadata.json",
+  "/logs/agent/nervure/nervure_report.md",
+]
+
+[task]
+name = "nervure-medium-coding/vcs_staging_snapshot"
+version = "0.1.0"
+description = "Make historical mini_vcs commits immutable snapshots."
+keywords = ["python", "debugging", "coding-agent", "bugfix", "vcs", "immutability"]
+
+[metadata]
+difficulty = "medium"
+category = "software"
+tags = ["bugfix", "vcs", "immutability"]
+
+[agent]
+timeout_sec = 900.0
+
+[verifier]
+timeout_sec = 120.0
+environment_mode = "separate"
+
+[environment]
+network_mode = "public"
+cpus = 2
+memory_mb = 2048
+
+[verifier.environment]
+network_mode = "no-network"
+cpus = 1
+memory_mb = 1024

@@ -1,6 +1,6 @@
 # Core Runtime Architecture
 
-本文描述 `core/` 的架构边界。`core/` 是 OneCode agent runtime 的编排层，只表达生命周期、状态和 transition，不承载具体工具、provider、安全策略、prompt 文本、上下文治理策略或 UI 行为。
+本文描述 `core/` 的架构边界。`core/` 是 Nervure agent runtime 的编排层，只表达生命周期、状态和 transition，不承载具体工具、provider、安全策略、prompt 文本、上下文治理策略或 UI 行为。
 
 ## 文件职责
 

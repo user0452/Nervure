@@ -52,7 +52,7 @@ flowchart TD
 
 ### Child runtime 装配
 
-`SubagentRunner.run()` 为每次调用创建独立的 `RuntimeState`、ephemeral `MessageStore`（只保留运行期内存消息链，不写 `.onecode/sessions/<child_session_id>/messages.jsonl`）、`ToolRegistry`、`ContextEngine`、`RegistryToolExecutor`、`AgentLoop`，共享父级的 workspace、model client、sandbox guard、permission policy、permission prompter、trace recorder 和 base descriptors。child 的中间消息只存在于 child runtime 内存中，不写回父 `MessageStore`，也不会成为可 `/resume` 的用户会话；父链只收到 `agent` 工具的最终 `ToolExecutionResult`。
+`SubagentRunner.run()` 为每次调用创建独立的 `RuntimeState`、ephemeral `MessageStore`（只保留运行期内存消息链，不写 `.nervure/sessions/<child_session_id>/messages.jsonl`）、`ToolRegistry`、`ContextEngine`、`RegistryToolExecutor`、`AgentLoop`，共享父级的 workspace、model client、sandbox guard、permission policy、permission prompter、trace recorder 和 base descriptors。child 的中间消息只存在于 child runtime 内存中，不写回父 `MessageStore`，也不会成为可 `/resume` 的用户会话；父链只收到 `agent` 工具的最终 `ToolExecutionResult`。
 
 ### Fork 机制
 
@@ -69,7 +69,7 @@ fork 由 `subagent_type is None` 决定（不是 `request.mode`）。`build_fork
 通过 `SubagentRequest.metadata["purpose"]` 进入更窄的受限模式：
 
 - `purpose="session_memory_extraction"`：仅暴露 `edit_file`，state 写 `memory_extraction_agent=True` 和 `allowed_memory_path`，只能写指定的 `session-memory.md`。
-- `purpose="long_term_memory_extraction"`：仅暴露 `read_file`/`grep`/`glob`/`write_file`/`edit_file`，state 写 `long_term_memory_extraction_agent=True` 和 `allowed_memory_dir`，写入限于 `.onecode/memory/` 下 `.md`。
+- `purpose="long_term_memory_extraction"`：仅暴露 `read_file`/`grep`/`glob`/`write_file`/`edit_file`，state 写 `long_term_memory_extraction_agent=True` 和 `allowed_memory_dir`，写入限于 job 选定的 `.nervure/memory/`（或 legacy `.onecode/memory/`）下 `.md`。
 
 这些限制由权限层强制（见 `permission-architecture.md`、`memory-architecture.md`、`compaction-architecture.md`）。
 
@@ -79,7 +79,13 @@ fork 由 `subagent_type is None` 决定（不是 `request.mode`）。`build_fork
 
 ### Trace
 
-runner 写入 `subagent_start`、`subagent_completed`、`subagent_error`，metadata 含 parent/child session、agent type、是否 fork、是否 read-only、usage、tool result count 和 duration（见 `observability-architecture.md`）。`child_session_id` 仅用于 trace、后台任务输出和父级 tool result 关联，不代表存在可恢复的 child transcript。
+runner 写入 `subagent_start`、`subagent_completed`、`subagent_error`，metadata 含 parent/child session、agent type、是否 fork、是否 read-only、usage、tool result count、model call count 和 duration（见 `observability-architecture.md`）。`child_session_id` 仅用于 trace、后台任务输出和父级 tool result 关联，不代表存在可恢复的 child transcript。
+
+评测指标以这些真实事件名为入口，并沿 `agent` 工具 span → child
+`interaction` span 的 lineage 拆分 Main/Child/Total usage；不能用共享
+`TraceRecorder.session_id` 判断 child。设置 `NERVURE_DISABLE_SUBAGENT=1`
+或 `NERVURE_DISABLE_AGENT_TOOL=1` 时，`agent` descriptor 不注册，因此
+provider schema 和动态 prompt 都不会暴露它；默认仍为 ON。
 
 ## 当前限制
 

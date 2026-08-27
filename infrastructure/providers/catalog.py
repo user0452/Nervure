@@ -49,6 +49,16 @@ BUILTIN_PROVIDERS: dict[str, ProviderDefinition] = {
         display_name="Gemini",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
     ),
+    "claude-openai-compatible": ProviderDefinition(
+        id="claude-openai-compatible",
+        display_name="Claude (OpenAI-compatible)",
+        base_url="",
+        requires_base_url=True,
+        notes=(
+            "User-provided OpenAI-compatible Claude gateway; Claude's native "
+            "Anthropic endpoint is not assumed to be Chat Completions compatible."
+        ),
+    ),
     "ollama": ProviderDefinition(
         id="ollama",
         display_name="Ollama",
@@ -72,6 +82,7 @@ CONNECT_PROVIDER_ORDER = (
     "minimax",
     "siliconflow",
     "gemini",
+    "claude-openai-compatible",
     "ollama",
     "custom",
 )

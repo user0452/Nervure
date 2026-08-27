@@ -11,11 +11,12 @@
 | `client.py` | `ModelClient` Protocol：`stream(snapshot) -> AsyncIterator[ModelStreamEvent]` |
 | `stream.py` | provider-neutral 流式事件 `ModelStreamEvent` 及工厂方法 |
 | `types.py` | `ProviderError`、`ModelUsage`、`LLMResponse` |
+| `deadline.py` | provider-neutral 完整模型调用墙钟截止与超时进度 metadata |
 | `retry.py` | `ModelRetryRunner` 缓冲式重试引擎、`RetryPolicy`、`RetryDecision` |
 
 ### services/errors.py
 
-provider-neutral 错误分类层，仅依赖 stdlib，供 core/services/infrastructure 共用，避免循环 import。定义 `ErrorCategory`、`ErrorDetails`、`OneCodeError` 及子类（`AbortError`、`ConfigParseError`、`ShellError`、`McpOperationError`、`ToolRuntimeError`、`RetryExhaustedError`）和 `onecode_error_details()` 等工具函数。
+provider-neutral 错误分类层，仅依赖 stdlib，供 core/services/infrastructure 共用，避免循环 import。定义 `ErrorCategory`、`ErrorDetails`、`NervureError` 及子类（`AbortError`、`ConfigParseError`、`ShellError`、`McpOperationError`、`ToolRuntimeError`、`RetryExhaustedError`）和 `nervure_error_details()` 等工具函数。
 
 ### infrastructure/
 
@@ -38,7 +39,7 @@ provider-neutral 错误分类层，仅依赖 stdlib，供 core/services/infrastr
 
 ### ProviderError
 
-继承 `OneCodeError`。字段：`message`、`provider_id`、`status_code`、`error_type`、`retryable`、`retry_after_seconds`。已知 `error_type`：`rate_limit_error`、`context_limit_exceeded`、`network_error`、`timeout_error`、`configuration_error`、`invalid_response`、`invalid_tool_arguments`。
+继承 `NervureError`。字段：`message`、`provider_id`、`status_code`、`error_type`、`retryable`、`retry_after_seconds`。已知 `error_type`：`rate_limit_error`、`context_limit_exceeded`、`network_error`、`timeout_error`、`configuration_error`、`invalid_response`、`invalid_tool_arguments`。
 
 ### ModelUsage
 
@@ -46,9 +47,9 @@ provider-neutral 错误分类层，仅依赖 stdlib，供 core/services/infrastr
 
 ### ResolvedProviderConfig
 
-`provider`、`provider_id`、`display_name`、`base_url`、`model`、`api_key`、`timeout_seconds`（默认 60）、`headers`、`default_params`、`models_path`（`/models`）、`chat_completions_path`（`/chat/completions`）。
+`provider`、`provider_id`、`display_name`、`base_url`、`model`、`api_key`、`timeout_seconds`（HTTP transport 默认 60）、`model_call_timeout_seconds`（完整模型调用墙钟截止默认 300）、`headers`、`default_params`、`models_path`（`/models`）、`chat_completions_path`（`/chat/completions`）。两种 timeout 独立：前者限制单次 HTTP 连接/读取，后者限制从模型流开始到 `message_completed` 的整次调用。
 
-`load_provider_config(env_path=".env")` 读取 `ONECODE_PROVIDER_ID` 作为当前激活供应商，然后按 provider id 派生大写前缀读取供应商块：`<PREFIX>_MODEL`、`<PREFIX>_API_KEY`、`<PREFIX>_BASE_URL`。例如 `deepseek` 使用 `DEEPSEEK_MODEL` / `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`，`custom` 使用 `CUSTOM_*`。`ONECODE_TIMEOUT_SECONDS`、`ONECODE_EXTRA_HEADERS`、`ONECODE_DEFAULT_PARAMS` 仍为全局可选键。OneCode 只从 `.env` 读取，dotenv interpolation 已禁用。
+`load_provider_config(env_path=".env")` 读取 `NERVURE_PROVIDER_ID` 作为当前激活供应商，然后按 provider id 派生大写前缀读取供应商块：`<PREFIX>_MODEL`、`<PREFIX>_API_KEY`、`<PREFIX>_BASE_URL`。例如 `deepseek` 使用 `DEEPSEEK_MODEL` / `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`，`custom` 使用 `CUSTOM_*`。`NERVURE_TIMEOUT_SECONDS`、`NERVURE_MODEL_CALL_TIMEOUT_SECONDS`、`NERVURE_EXTRA_HEADERS`、`NERVURE_DEFAULT_PARAMS` 为全局可选键；对应旧 `ONECODE_*` 键仅作为向后兼容 fallback。Nervure 正常 CLI 只从 `.env` 读取，dotenv interpolation 已禁用。
 
 ## 核心数据流
 
@@ -57,7 +58,8 @@ flowchart TD
   Loop["AgentLoop"] --> Retry["ModelRetryRunner.stream(operation, on_retry)"]
   Retry --> Op["operation = λ: ModelClient.stream(snapshot)"]
   Op --> Client["OpenAICompatibleChatCompletionsClient.stream"]
-  Client --> Payload["_build_payload: system + project_messages + tools + max_tokens"]
+  Client --> Deadline["model-call wall-clock deadline"]
+  Deadline --> Payload["_build_payload: system + project_messages + tools + max_tokens"]
   Payload --> Transport["HttpxAsyncHttpTransport.stream_json_lines"]
   Transport --> Provider["Provider /chat/completions (SSE)"]
   Provider --> Parse["解析 SSE: content/tool_calls/usage/finish_reason"]
@@ -79,7 +81,11 @@ flowchart TD
 
 ## 关键机制
 
-### ModelRetryRunner 缓冲式重试
+### Model call deadline 与 ModelRetryRunner
+
+`services/model/deadline.py` 的 `stream_with_wall_clock_deadline()` 是 provider-neutral 流包装器。它在事件持续到达但始终没有完成消息时仍会在 `model_call_timeout_seconds` 到期后关闭底层 async iterator，并抛出不可重试的 `ProviderError(error_type="timeout_error")`。错误 metadata 只包含 deadline、elapsed 和 partial text/tool 计数，不包含正文。`timeout_error` 不进入 retry，避免慢调用被无限重试。HTTP transport 的 `timeout_seconds` 仍独立负责连接/读取。
+
+### ModelRetryRunner 重试
 
 `stream(operation, *, on_retry)`：
 1. 每次 attempt 执行 `operation()`，**缓冲全部 events**。
@@ -102,7 +108,7 @@ flowchart TD
 
 ### Provider 目录
 
-内置 8 个 OpenAI-compatible provider：`openai`、`deepseek`、`glm`、`minimax`、`siliconflow`、`gemini`、`claude-openai-compatible`、`custom`。`requires_base_url` 的 provider 必须在 `.env` 提供 base URL。`ProviderConnectionService` 当前是占位，供未来 CLI `/connect`。
+内置 9 个 OpenAI-compatible provider：`openai`、`deepseek`、`glm`、`minimax`、`siliconflow`、`gemini`、`claude-openai-compatible`、`ollama`、`custom`。其中 Claude 条目代表用户提供的 OpenAI-compatible gateway，并不假设 Claude 原生 Anthropic endpoint 兼容 Chat Completions。`requires_base_url` 的 provider 必须在 `.env` 提供 base URL。`ProviderConnectionService` 当前是占位，供未来 CLI `/connect`。
 
 ## 依赖约束
 
@@ -114,5 +120,5 @@ flowchart TD
 ## 已知差异与限制
 
 - `ModelUsage.cache_creation_input_tokens` 字段存在，但适配器当前未从 provider 响应填充（恒为 0）。
-- `timeout_error`、`authentication_error`、`server_error` 在 `errors.py` 可分类，但 `ProviderError._provider_error_category` 未单独映射后两者（落 `PROVIDER`），超时实际抛 `network_error`。
+- `timeout_error` 归入 network 类别，但整次模型调用墙钟截止现在由 `services/model/deadline.py` 统一抛出 `error_type="timeout_error"`；HTTP transport 自身的连接/读取超时仍是独立 network error。
 - `retry_after_seconds` 的 delay 逻辑已实现，但 `provider_error_from_http_status` 暂未解析 HTTP `Retry-After` 头。

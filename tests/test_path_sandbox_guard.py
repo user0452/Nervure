@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from infrastructure.filesystem.paths import (
     contains_path,
@@ -77,6 +80,27 @@ def test_root_worktree_does_not_allow_arbitrary_paths(tmp_path: Path) -> None:
 
     assert policy.action == "ask"
     assert policy.decision.kind == "external_directory"
+
+
+def test_filesystem_root_worktree_is_discarded_before_classification(
+    tmp_path: Path,
+) -> None:
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    boundary = SandboxBoundary(cwd=cwd, worktree=Path(Path.cwd().anchor))
+
+    assert boundary.worktree is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive-root regression")
+def test_windows_drive_root_worktree_is_never_trusted(tmp_path: Path) -> None:
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    boundary = SandboxBoundary(cwd=cwd, worktree=Path("C:\\"))
+
+    assert boundary.worktree is None
 
 
 def test_guard_allows_extra_allowed_directory(tmp_path: Path) -> None:

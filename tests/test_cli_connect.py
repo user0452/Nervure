@@ -92,6 +92,8 @@ def test_write_provider_env_updates_provider_block_without_overwriting_others(
     config = load_provider_config(env_path)
     assert "# keep this" in text
     assert "OTHER_SETTING=yes" in text
+    assert "NERVURE_PROVIDER_ID=deepseek" in text
+    assert "ONECODE_PROVIDER_ID" not in text
     assert "ONECODE_MODEL" not in text
     assert "ONECODE_API_KEY" not in text
     assert "OPENAI_API_KEY=openai-secret" in text
@@ -160,3 +162,25 @@ def test_runtime_with_model_config_rebinds_model_client(
     assert rebound.model_client is new_client
     assert rebound.loop.model_client is new_client
     assert rebound.memory_selector is not runtime.memory_selector
+
+
+def test_runtime_with_model_config_uses_shared_provider_config_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime = make_runtime(tmp_path)
+    shared_config = tmp_path / "shared-onecode.env"
+    runtime.provider_config_path = shared_config
+    captured_paths: list[Path] = []
+    new_client = FakeModelClient(display_name="Custom", model="custom-model")
+
+    def fake_create_model_client(env_path: Path) -> FakeModelClient:
+        captured_paths.append(env_path)
+        return new_client
+
+    monkeypatch.setattr("ui.cli.types.create_model_client", fake_create_model_client)
+
+    rebound = runtime.with_model_config()
+
+    assert captured_paths == [shared_config]
+    assert rebound.model_client is new_client

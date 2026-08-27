@@ -6,21 +6,22 @@ import errno
 from services.errors import (
     AbortError,
     ErrorCategory,
+    NervureError,
     OneCodeError,
     error_message,
     errno_code,
     errno_path,
     is_abort_error,
     is_fs_inaccessible,
-    onecode_error_details,
+    nervure_error_details,
     short_error_stack,
     to_error,
 )
 from services.model.types import ProviderError
 
 
-def test_onecode_error_details_for_base_error() -> None:
-    error = OneCodeError(
+def test_nervure_error_details_for_base_error() -> None:
+    error = NervureError(
         "full message",
         category=ErrorCategory.TOOL,
         retryable=True,
@@ -28,17 +29,17 @@ def test_onecode_error_details_for_base_error() -> None:
         metadata={"tool_name": "read_file"},
     )
 
-    details = onecode_error_details(error)
+    details = nervure_error_details(error)
 
     assert details.category == ErrorCategory.TOOL
-    assert details.error_type == "OneCodeError"
+    assert details.error_type == "NervureError"
     assert details.message == "full message"
     assert details.safe_message == "safe message"
     assert details.retryable is True
     assert details.metadata == {"tool_name": "read_file"}
 
 
-def test_provider_error_inherits_onecode_error_with_category() -> None:
+def test_provider_error_inherits_nervure_error_with_legacy_alias() -> None:
     error = ProviderError(
         "too many requests",
         provider_id="openai",
@@ -48,9 +49,10 @@ def test_provider_error_inherits_onecode_error_with_category() -> None:
         retry_after_seconds=2.5,
     )
 
-    details = onecode_error_details(error)
+    details = nervure_error_details(error)
 
-    assert isinstance(error, OneCodeError)
+    assert isinstance(error, NervureError)
+    assert OneCodeError is NervureError
     assert error.provider_id == "openai"
     assert error.status_code == 429
     assert error.error_type == "rate_limit_error"
@@ -67,7 +69,7 @@ def test_filesystem_inaccessible_helpers() -> None:
     assert errno_code(error) == "ENOENT"
     assert errno_path(error) == "missing.txt"
 
-    details = onecode_error_details(error)
+    details = nervure_error_details(error)
 
     assert details.category == ErrorCategory.FILESYSTEM
     assert details.metadata["errno"] == "ENOENT"
@@ -78,7 +80,7 @@ def test_abort_helpers() -> None:
     assert is_abort_error(AbortError()) is True
     assert is_abort_error(asyncio.CancelledError()) is True
 
-    details = onecode_error_details(AbortError("stopped"))
+    details = nervure_error_details(AbortError("stopped"))
 
     assert details.category == ErrorCategory.ABORT
     assert details.message == "stopped"

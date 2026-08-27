@@ -85,22 +85,22 @@ def render_permission_modal_ansi(modal: PermissionModal, *, width: int) -> ANSI:
         width=max(width, 20),
         theme=RICH_THEME,
     )
-    console.print(Text(render_permission_request_summary(modal.request), style="onecode.metric"))
+    console.print(Text(render_permission_request_summary(modal.request), style="nervure.metric"))
     console.print()
-    console.print(Text("Do you want to proceed?", style="onecode.permission"))
+    console.print(Text("Do you want to proceed?", style="nervure.permission"))
     for index, choice in enumerate(modal.choices):
         marker = "> " if index == modal.selected_index else "  "
-        style = "onecode.permission" if index == modal.selected_index else "onecode.metric"
+        style = "nervure.permission" if index == modal.selected_index else "nervure.metric"
         console.print(Text(f"{marker}{choice.shortcut}. {choice.label}", style=style))
     console.print()
-    console.print(Text("Esc to cancel - Up/Down to select - Enter to confirm", style="onecode.subtle"))
+    console.print(Text("Esc to cancel - Up/Down to select - Enter to confirm", style="nervure.subtle"))
     return ANSI(out.getvalue())
 
 
 def render_permission_status_fragments(modal: PermissionModal) -> FormattedText:
     return FormattedText(
         [
-            ("class:stream-prefix", "onecode> "),
+            ("class:stream-prefix", "Nervure> "),
             (
                 "class:stream-status",
                 f"permission: {modal.request.descriptor.name}  (1/2/3, Enter, Esc)",

@@ -56,7 +56,7 @@ def _parse_server_config(name: str, raw_config: dict[str, Any]) -> McpServerConf
         field = sorted(unsupported)[0]
         raise McpConfigError(
             f"MCP server '{name}' uses unsupported field '{field}'. "
-            "OneCode MCP v1 supports static stdio, sse and http tools only."
+            "Nervure MCP v1 supports static stdio, sse and http tools only."
         )
     transport = raw_config.get("type", "stdio")
     if transport not in {"stdio", "sse", "http"}:

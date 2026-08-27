@@ -6,11 +6,13 @@ import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import timedelta
+import ipaddress
 import os
 from pathlib import Path
 import tempfile
 from threading import Thread
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -319,24 +321,30 @@ class McpConnectionManager:
             )
             return tuple(await exit_stack.enter_async_context(stdio_client(params, errlog=stderr_log)))
         if config.transport == "sse":
+            url = config.url or ""
             return tuple(
                 await exit_stack.enter_async_context(
                     sse_client(
-                        config.url or "",
+                        url,
                         headers=dict(config.headers),
                         timeout=self.timeout_seconds,
+                        httpx_client_factory=_httpx_client_factory(
+                            trust_env=not _is_loopback_url(url)
+                        ),
                     )
                 )
             )
+        url = config.url or ""
         http_client = await exit_stack.enter_async_context(
             httpx.AsyncClient(
                 headers=dict(config.headers),
                 timeout=self.timeout_seconds,
+                trust_env=not _is_loopback_url(url),
             )
         )
         return tuple(
             await exit_stack.enter_async_context(
-                streamable_http_client(config.url or "", http_client=http_client)
+                streamable_http_client(url, http_client=http_client)
             )
         )
 
@@ -396,6 +404,36 @@ class McpConnectionManager:
                 "content_size": content_size,
             },
         )
+
+
+def _is_loopback_url(url: str) -> bool:
+    host = urlparse(url).hostname
+    if not host:
+        return False
+    normalized = host.casefold()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _httpx_client_factory(*, trust_env: bool):
+    def factory(
+        headers: dict[str, Any] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            follow_redirects=True,
+            trust_env=trust_env,
+        )
+
+    return factory
 
 
 def _discovered_tools(server_name: str, sdk_tools: Any) -> tuple[McpDiscoveredTool, ...]:

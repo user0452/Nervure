@@ -9,6 +9,11 @@ class HookEvent(StrEnum):
     PRE_TOOL_USE = "PreToolUse"
     POST_TOOL_USE = "PostToolUse"
     TOOL_ERROR = "ToolError"
+    # Lifecycle aliases keep the legacy event identifiers stable while exposing
+    # the public before/after/error vocabulary used by integrations.
+    BEFORE_TOOL_CALL = "PreToolUse"
+    AFTER_TOOL_RESULT = "PostToolUse"
+    ON_TOOL_ERROR = "ToolError"
     USER_PROMPT_SUBMIT = "UserPromptSubmit"
     ASSISTANT_MESSAGE_COMPLETED = "AssistantMessageCompleted"
     TURN_STOPPED = "TurnStopped"

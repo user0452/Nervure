@@ -1,20 +1,20 @@
-# OneCode Core Beliefs
+# Nervure Core Beliefs
 
-本文记录 OneCode 作为完整 code agent runtime 持续演化时应坚持的核心信念。
+本文记录 Nervure 作为完整 code agent runtime 持续演化时应坚持的核心信念。
 
-它不是功能清单，也不是短期路线图。它的用途是帮助我们在增加能力、重构模块、引入插件、扩展权限或上下文系统时，判断一个设计是否符合 OneCode 的方向。
+它不是功能清单，也不是短期路线图。它的用途是帮助我们在增加能力、重构模块、引入插件、扩展权限或上下文系统时，判断一个设计是否符合 Nervure 的方向。
 
 ## 项目定位
 
-OneCode 是一个小而清晰的 code-agent。
+Nervure 是一个小而清晰的 code-agent。
 
 它围绕模型、工具、状态、权限、上下文治理和错误恢复组织起来。它不是简单的 CLI wrapper，也不应该通过不断复制某个成熟产品的表面功能来获得复杂度。
 
-OneCode 的完整性不来自把更多逻辑塞进主循环，而来自把能力拆成可注册、可组合、可治理的层，并让主循环只负责稳定编排。
+Nervure 的完整性不来自把更多逻辑塞进主循环，而来自把能力拆成可注册、可组合、可治理的层，并让主循环只负责稳定编排。
 
 ## 已经落地的核心结构
 
-OneCode 已经把下列结构落地为可运行的运行时。后续演化应加强这些方向，而不是绕开它们：
+Nervure 已经把下列结构落地为可运行的运行时。后续演化应加强这些方向，而不是绕开它们：
 
 - 一个薄主循环驱动流式模型调用、工具执行、工具结果回填和 transition 判定；续轮只看实际 tool calls，不依赖 provider 私有 `stop_reason`。
 - 工具通过 `ToolRegistry` 暴露 schema 和 handler，由 descriptor、classifier 和 executor 接入，而不是硬编码在 loop 中。
@@ -52,7 +52,7 @@ Agent 的最小内核是：
 
 ### 2. 运行时动态组装胜过硬编码
 
-OneCode 应从真实运行状态生成行为，而不是依赖静态硬编码。
+Nervure 应从真实运行状态生成行为，而不是依赖静态硬编码。
 
 工具 schema 应来自当前启用且未被拒绝的 `ToolRegistry`。系统提示词应来自当前 workspace、工具、权限模式、压缩状态和未来的 memory、skill、task 状态。禁用或拒绝一个工具后，它不应继续出现在 schema、prompt 或执行路径中。
 
@@ -80,7 +80,7 @@ deny 是最高优先级。
 
 拒绝优先还必须在执行入口重复校验。动态组装可以减少模型发起非法工具调用的机会，但不能替代执行前检查；历史消息、旧 schema、provider 行为或手写 tool call 都可能带来已经不可见但仍被请求的工具。
 
-OneCode 的权限判断应遵循一个保守顺序：
+Nervure 的权限判断应遵循一个保守顺序：
 
 1. 先合并规则来源。
 2. 先判断 deny。
@@ -132,7 +132,7 @@ hook 可以阻断、记录、补充上下文或调整输入，但不应绕过更
 
 模型可以被 prompt 要求谨慎，但真正的安全边界必须发生在工具执行前。路径校验、危险命令阻断、写入范围限制、权限规则、用户确认和审计日志，都应由 runtime 执行。
 
-OneCode 的安全模型应逐步走向分层：
+Nervure 的安全模型应逐步走向分层：
 
 - 工具自身的输入校验。
 - 通用权限规则。
@@ -147,7 +147,7 @@ OneCode 的安全模型应逐步走向分层：
 
 路径安全不是字符串前缀匹配。
 
-OneCode 的文件边界判断应建立在规范化后的路径上：
+Nervure 的文件边界判断应建立在规范化后的路径上：
 
 - 先把输入路径解析为绝对路径。
 - 在 Windows 上归一 `/C:/...`、`/c/...`、`/cygdrive/c/...`、`/mnt/c/...` 等等价路径。
@@ -201,7 +201,7 @@ OneCode 的文件边界判断应建立在规范化后的路径上：
 
 API 错误、上下文超限、输出截断、连接中断和工具失败，都是 agent runtime 的正常路径。
 
-OneCode 不应只把它们视为异常文本，而应把它们归类为明确的 transition（`TransitionReason` 枚举）：
+Nervure 不应只把它们视为异常文本，而应把它们归类为明确的 transition（`TransitionReason` 枚举）：
 
 - `tool_use`
 - `completed`
@@ -222,11 +222,11 @@ transition 应服务于三件事：
 
 ### 10. 模型提供商是可替换边界
 
-OneCode 不应把核心 runtime 绑定到某个模型 SDK。
+Nervure 不应把核心 runtime 绑定到某个模型 SDK。
 
-模型客户端应负责把 provider 的协议、字段、错误和 usage 信息归一化为 OneCode 内部结构。主循环只依赖 provider-neutral 的 `ModelClient.stream(snapshot)` 协议、`ModelStreamEvent` 流式事件和 `ProviderError` 错误类型；续轮判定只看 `message_completed.metadata["tool_calls"]`，不读 provider 私有字段。
+模型客户端应负责把 provider 的协议、字段、错误和 usage 信息归一化为 Nervure 内部结构。主循环只依赖 provider-neutral 的 `ModelClient.stream(snapshot)` 协议、`ModelStreamEvent` 流式事件和 `ProviderError` 错误类型；续轮判定只看 `message_completed.metadata["tool_calls"]`，不读 provider 私有字段。
 
-这使 OneCode 可以支持不同 OpenAI 兼容服务、流式解析、fallback model 和 provider-specific recovery，而不污染 agent 核心。
+这使 Nervure 可以支持不同 OpenAI 兼容服务、流式解析、fallback model 和 provider-specific recovery，而不污染 agent 核心。
 
 ### 11. 可观测性是产品能力，不只是 debug
 
@@ -241,11 +241,11 @@ Code agent 做了很多不可见决策：为什么调用某个工具，为什么
 - transition reason。
 - transcript 和大结果路径。
 
-OneCode 用结构化 trace（`TraceRecorder` → `.onecode/sessions/<session>/trace.jsonl`）记录短小 runtime 事实，用独立 error log（`ErrorLogRecorder` → `errors.jsonl`）记录未恢复失败的调试证据，两者分离且统一脱敏。UI、debug mode 和测试 harness 都应复用这套结构化记录，而不是各自解析文本日志。
+Nervure 用结构化 trace（`TraceRecorder` → `.nervure/sessions/<session>/trace.jsonl`）记录短小 runtime 事实，用独立 error log（`ErrorLogRecorder` → `errors.jsonl`）记录未恢复失败的调试证据，两者分离且统一脱敏。已有 `.onecode/sessions/` 仅作为读取兼容。UI、debug mode 和测试 harness 都应复用这套结构化记录，而不是各自解析文本日志。
 
 ### 12. 简洁是演化速度的保护层
 
-OneCode 可以逐步拥有复杂能力，但每一层都应保持局部简单。
+Nervure 可以逐步拥有复杂能力，但每一层都应保持局部简单。
 
 复杂系统不可避免，复杂主循环不是。完整项目应该通过清晰边界容纳复杂度：
 

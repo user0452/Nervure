@@ -693,6 +693,56 @@ def test_executor_records_tool_permission_and_result_trace(tmp_path) -> None:
     assert "outside" not in json.dumps(result_event["attributes"], ensure_ascii=False)
 
 
+def test_executor_debug_trace_records_arguments_and_bounded_result(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    registry = ToolRegistry(
+        [
+            make_descriptor(
+                "debug_tool",
+                handler=lambda tool_input, runtime: ToolExecutionResult(
+                    tool_call_id="call-debug",
+                    tool_name="debug_tool",
+                    content="0123456789",
+                ),
+            )
+        ]
+    )
+    state = RuntimeState(session_id="session-debug-tool")
+    sink = JsonlTraceSink(tmp_path / ".onecode", state.session_id, flush_interval_seconds=60)
+    recorder = TraceRecorder(
+        session_id=state.session_id,
+        workspace=workspace,
+        sink=sink,
+        trace_level="debug",
+        max_tool_result_chars=5,
+    )
+    executor = RegistryToolExecutor(registry, trace_recorder=recorder)
+
+    execute_results(
+        executor,
+        (ToolCall(id="call-debug", name="debug_tool", input={"call_id": "x"}),),
+        state,
+    )
+    recorder.flush()
+    records = [
+        json.loads(line)
+        for line in sink.trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    execution_start = next(
+        record
+        for record in records
+        if record["name"] == "tool_execution" and record["record_type"] == "span_start"
+    )
+    result_event = next(record for record in records if record["name"] == "tool_result")
+
+    assert execution_start["attributes"]["tool_arguments"]["call_id"] == "x"
+    assert result_event["attributes"]["tool_result_text"] == "01234"
+    assert result_event["attributes"]["result_length"] == 10
+    assert result_event["attributes"]["truncated"] is True
+    assert result_event["attributes"]["duration_ms"] >= 0
+
+
 def test_executor_returns_permission_denied_when_user_denies(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

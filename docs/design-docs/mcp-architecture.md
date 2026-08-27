@@ -77,5 +77,5 @@ server instructions 注入 prompt `# MCP Server Instructions` section（见 `pro
 ## 持久化与配置
 
 - 配置：`{workspace}/.mcp.json`
-- Trust 记录：`{workspace}/.onecode/settings.json` 的 `mcp.trustedServers`
+- Trust 记录：`{workspace}/.nervure/settings.json` 的 `mcp.trustedServers`（兼容读取旧 `.onecode/settings.json`）
 - 连接状态仅存进程内存，不持久化。

@@ -3,7 +3,7 @@
 These tests grow with the milestones in
 ``docs/exec-plans/active/cli-inline-terminal-ui-refactor-execplan.md``:
 
-- M2: static-region printers (reverse user line, ``onecode>`` prefix,
+- M2: static-region printers (reverse user line, ``Nervure>`` prefix,
   tool banners).
 - M3: completion adapter + Enter/Tab semantics + input queue.
 - M5: alternate-screen (DEC 1049) lifecycle.
@@ -70,6 +70,7 @@ def captured_console() -> io.StringIO:
     so._STATIC_CONSOLE = Console(  # noqa: SLF001
         file=buffer,
         force_terminal=True,
+        no_color=False,
         color_system="standard",
         width=80,
         theme=RICH_THEME,
@@ -142,7 +143,7 @@ def test_replay_messages_reuse_normal_static_renderers(
     # User line is reverse-video and present.
     assert "> restore this" in replayed
     # Assistant text reply went through the Markdown commit path.
-    assert "onecode>" in replayed
+    assert "Nervure>" in replayed
     assert "restored answer" in replayed
     # Tool-only assistant message produced no synthetic "assistant: <tool call>".
     assert "<tool call" not in replayed
@@ -154,7 +155,7 @@ def test_replay_messages_reuse_normal_static_renderers(
 def test_assistant_prefix_is_printed(captured_console: io.StringIO) -> None:
     so.print_assistant_start()
     output = captured_console.getvalue()
-    assert "onecode>" in output
+    assert "Nervure>" in output
 
 
 def test_assistant_markdown_renders_body(captured_console: io.StringIO) -> None:
@@ -600,7 +601,7 @@ def test_handle_command_reset_main_view_rebuilds_prompt_and_prints_banner(
     assert repl._prompt is not old_prompt
     assert repl._prompt._runtime is new_runtime
     assert output.startswith("\n" * 6)
-    assert "OneCode" in output
+    assert "Nervure" in output
     assert "clear notice" in output
 
 
@@ -1245,6 +1246,80 @@ def test_repl_run_turn_passes_queue_into_streaming_session(
     assert repl._agent_running is False
 
 
+def test_repl_plan_review_approve_uses_keyboard_choice(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from core.runtime_state import InteractionKind
+
+    runtime = make_runtime(tmp_path)
+    runtime.state.suspend(InteractionKind.PLAN_REVIEW)
+    repl = InlineRepl(runtime)
+    handled: list[str] = []
+
+    class _Selector:
+        def __init__(self, title, items):
+            assert title == "Plan ready"
+            assert [item.value for item in items] == ["approve", "modify", "reject"]
+
+        async def run(self):
+            return SimpleNamespace(value="approve")
+
+    async def handle(line: str) -> None:
+        handled.append(line)
+
+    monkeypatch.setattr(repl_module, "TransientSelector", _Selector)
+    monkeypatch.setattr(repl, "_handle_command", handle)
+
+    asyncio.run(repl._run_plan_review())
+
+    assert handled == ["/plan approve"]
+
+
+def test_repl_plan_review_modify_collects_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from core.runtime_state import InteractionKind
+
+    runtime = make_runtime(tmp_path)
+    runtime.state.suspend(InteractionKind.PLAN_REVIEW)
+    repl = InlineRepl(runtime)
+    handled: list[str] = []
+
+    class _Selector:
+        def __init__(self, title, items):
+            _ = title, items
+
+        async def run(self):
+            return SimpleNamespace(value="modify")
+
+    class _FeedbackPrompt:
+        def __init__(self, runtime, queue, *, bottom_hint=""):
+            _ = runtime, queue
+            assert "changes" in bottom_hint
+
+        async def read(self):
+            return PromptSubmission(
+                kind=SubmissionKind.SUBMIT,
+                text="keep the API compatible",
+            )
+
+    async def handle(line: str) -> None:
+        handled.append(line)
+
+    monkeypatch.setattr(repl_module, "TransientSelector", _Selector)
+    monkeypatch.setattr(repl_module, "PromptSession", _FeedbackPrompt)
+    monkeypatch.setattr(repl_module, "print_user_submitted", lambda *args, **kwargs: None)
+    monkeypatch.setattr(repl, "_handle_command", handle)
+
+    asyncio.run(repl._run_plan_review())
+
+    assert len(handled) == 1
+    assert handled[0].startswith("/plan reject ")
+    assert "keep the API compatible" in handled[0]
+
+
 # --- M5: transient selector + page ----------------------------------------
 
 
@@ -1387,13 +1462,13 @@ def test_page_does_not_close_on_q_or_enter() -> None:
     assert asyncio.run(run("\r")) >= 0.04
 
 
-def test_page_renders_onecode_styles() -> None:
+def test_page_renders_nervure_styles() -> None:
     from rich.table import Table
 
     from ui.cli.terminal.page import _render_to_ansi
 
-    table = Table(header_style="onecode.subtle")
-    table.add_column("field", style="onecode.subtle")
+    table = Table(header_style="nervure.subtle")
+    table.add_column("field", style="nervure.subtle")
     table.add_row("value")
     rendered = _render_to_ansi(table, width=80)
     assert "field" in rendered

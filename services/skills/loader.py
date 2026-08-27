@@ -42,7 +42,7 @@ def load_all_commands(cwd: Path | str) -> tuple[SkillCommand, ...]:
         merged[command.name] = command
     for command in _load_from_dir(_user_skills_dir(), "user"):
         merged[command.name] = command
-    for command in _load_from_dir(workspace / ".onecode" / "skills", "project"):
+    for command in _load_from_dir(_project_skills_dir(workspace), "project"):
         merged[command.name] = command
     return tuple(merged[name] for name in sorted(merged))
 
@@ -66,10 +66,27 @@ def clear_skill_caches() -> None:
 
 
 def _user_skills_dir() -> Path:
-    base = os.environ.get("ONECODE_HOME")
+    base = os.environ.get("NERVURE_HOME") or os.environ.get("ONECODE_HOME")
     if base and base.strip():
         return Path(base).expanduser() / "skills"
-    return Path.home() / ".onecode" / "skills"
+    home = Path.home()
+    return _preferred_skills_dir(
+        home / ".nervure" / "skills",
+        home / ".onecode" / "skills",
+    )
+
+
+def _project_skills_dir(workspace: Path) -> Path:
+    return _preferred_skills_dir(
+        workspace / ".nervure" / "skills",
+        workspace / ".onecode" / "skills",
+    )
+
+
+def _preferred_skills_dir(primary: Path, legacy: Path) -> Path:
+    if primary.exists() or not legacy.exists():
+        return primary
+    return legacy
 
 
 def _load_from_dir(skills_dir: Path, source: str) -> tuple[SkillCommand, ...]:

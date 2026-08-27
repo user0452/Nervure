@@ -15,7 +15,7 @@ Rules:
 - Complex shell language such as subshells, command substitution, heredocs, process substitution, loops, functions, and conditionals is treated conservatively.
 - Read-only commands such as `git status`, `git diff`, `ls`, `cat`, `rg`, and `grep` may run automatically when their paths stay within allowed project areas.
 - Commands that write, delete, execute unknown programs, or have unclear side effects may require permission before execution.
-- For slow commands, set `run_in_background=true`. The tool returns immediately with a `b_...` task id and an output file under `.onecode/<session>/background-tasks/`; completion is reported as a `<task_notification>` only on the user's next input.
+- For slow commands, set `run_in_background=true`. The tool returns immediately with a `b_...` task id and an output file under `.nervure/sessions/<session>/background-tasks/`; existing legacy `.onecode` sessions remain readable. Completion is reported as a `<task_notification>` only on the user's next input.
 
 Returns:
 - The command, exit code, stdout, stderr, timeout status, and any command-specific interpretation.

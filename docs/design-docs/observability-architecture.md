@@ -47,17 +47,19 @@ flowchart TD
   Loop["loop / executor / hooks / subagent / compaction / memory / mcp / background"] --> Rec["TraceRecorder.event/span"]
   Rec --> San["sanitize_attributes"]
   San --> Sink["JsonlTraceSink (缓冲, flush 1s, atexit)"]
-  Sink --> File[".onecode/sessions/&lt;session&gt;/trace.jsonl"]
+  Sink --> File[".nervure/sessions/&lt;session&gt;/trace.jsonl"]
 
   Err["不可恢复错误 / ProviderError / MCP 错误"] --> ErrRec["ErrorLogRecorder.record_error"]
   ErrRec --> San2["sanitize + Bearer/sk- 脱敏"]
   San2 --> ErrSink["JsonlErrorLogSink"]
-  ErrSink --> ErrFile[".onecode/sessions/&lt;session&gt;/errors.jsonl"]
+  ErrSink --> ErrFile[".nervure/sessions/&lt;session&gt;/errors.jsonl"]
 ```
 
 ## 关键机制
 
-### 脱敏
+### Trace level 与脱敏
+
+`TraceRecorder` 支持 `normal`/`debug` 两级。normal 只写短小结构化 metadata；debug 才写 provider 返回的 assistant visible text、provider-visible reasoning（若实际返回）、tool arguments/results（受 `max_tool_result_chars` 限制）和 selector final text。hidden reasoning 不会由 token 数伪造；若 adapter 只返回 reasoning tokens，trace 只写 tokens/status。两级都保持 JSONL 每行结构。
 
 `sanitize_attributes`：最多 20 个 key、字符串 240 字符、嵌套深度 2；敏感 key 子串（`key`/`token`/`secret`/`password`/`authorization`/`header`/`env`/`content`/`prompt`/`stdout`/`stderr`/`old_string`/`new_string`）→ `[redacted]`；安全计数器白名单（`input_tokens`、`stdout_chars` 等）不 redact；路径 key 相对 workspace，外部路径 → `[external_path]{suffix}`。error log 额外对 message/stack 做 Bearer token 和 `sk-*` 正则替换。
 
@@ -76,7 +78,15 @@ flowchart TD
 | session memory | event `session_memory_update`、`session_memory_extraction_decision`/`_completed`/`_failed` |
 | long-term memory | event `long_term_memory_selector_completed`/`_failed`、`long_term_memory_extraction_decision`/`_completed`/`_cancelled`/`_failed` |
 
-trace 只记录摘要 metadata，不记录完整 prompt、源码或工具输出。
+Subagent 评测使用 `subagent_start`、`subagent_completed`、`subagent_error`
+三个实际事件名。子运行时仍共享 recorder，因此 child 模型/工具记录靠
+span lineage 归属到对应的 child `interaction`，而不是按 recorder session
+ID 猜测。`evals.metrics.NervureTraceAnalyzer` 输出
+`main_agent`、`child_agent`、`total` 三组 usage，并在 `subagent` 下保留
+每个 child 的 agent type、fork/read-only、duration、model usage、tool
+calls/errors 和完成/错误状态。
+
+normal trace 只记录摘要 metadata，不记录完整 prompt、源码或工具输出；debug trace 仍不 dump ContextSnapshot 全文，改记 system/tool schema hash、message ids/roles、selected memory paths 与 token 估算，并按统一 sanitizer 脱敏和截断 debug 正文。完整 transcript 仍是原文来源。
 
 ### 分离原则
 
@@ -84,5 +94,5 @@ trace 保存短小 runtime 事实，不承载完整 stack 或 debug 文本；err
 
 ## 持久化路径
 
-- trace：`{workspace}/.onecode/sessions/<session_id>/trace.jsonl`
-- error log：`{workspace}/.onecode/sessions/<session_id>/errors.jsonl`
+- trace：`{workspace}/.nervure/sessions/<session_id>/trace.jsonl`（兼容读取旧 `.onecode/sessions/`）
+- error log：`{workspace}/.nervure/sessions/<session_id>/errors.jsonl`

@@ -27,12 +27,13 @@ class MessageStore:
         self,
         *,
         transcript_store: Any | None = None,
-        transcript_root: Path | str = ".onecode",
+        transcript_root: Path | str = ".nervure",
         session_id: str | None = None,
         cwd: Path | None = None,
         flush_interval_seconds: float = 1.0,
     ) -> None:
         self._messages: list[dict[str, Any]] = []
+        self._message_ids: list[str] = []
         self._last_uuid: str | None = None
         resolved_session_id = session_id or str(uuid.uuid4())
         self._transcript_store = transcript_store or JsonlTranscriptStore(
@@ -107,6 +108,17 @@ class MessageStore:
 
         return tuple(deepcopy(self._messages))
 
+    def current_message_trace_metadata(self) -> tuple[dict[str, Any], ...]:
+        """Return IDs/roles for trace correlation without exposing message text."""
+
+        return tuple(
+            {
+                "message_id": message_id,
+                "role": message.get("role"),
+            }
+            for message_id, message in zip(self._message_ids, self._messages)
+        )
+
     def seed_messages(
         self,
         messages: Iterable[dict[str, Any]],
@@ -139,6 +151,7 @@ class MessageStore:
 
         self.flush_transcript()
         self._messages.clear()
+        self._message_ids.clear()
         self._last_uuid = None
         stored: list[dict[str, Any]] = []
         for message in replacement:
@@ -212,7 +225,7 @@ class MessageStore:
         """从 JSONL transcript 恢复内存消息存储。
 
         参数:
-        - transcript_store: 指向既有 `.onecode/sessions/<session_id>/messages.jsonl`
+        - transcript_store: 指向既有 `.nervure/sessions/<session_id>/messages.jsonl`（也兼容旧 `.onecode` 会话）
           的 transcript store。
         - state: 当前运行时状态。恢复成功后会把 `state.session_id` 替换为
           transcript 文件中的 session UUID。
@@ -224,6 +237,9 @@ class MessageStore:
 
         message_store = cls(transcript_store=transcript_store)
         message_store._messages = [deepcopy(message) for message in restored.messages]
+        message_store._message_ids = [
+            f"restored:{index}" for index, _ in enumerate(restored.messages)
+        ]
         message_store._last_uuid = restored.last_uuid
         return message_store
 
@@ -231,6 +247,7 @@ class MessageStore:
         stored = deepcopy(message)
         self._messages.append(stored)
         message_uuid = str(uuid.uuid4())
+        self._message_ids.append(message_uuid)
         self._transcript_store.append_message(
             stored,
             message_uuid=message_uuid,

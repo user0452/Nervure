@@ -13,6 +13,7 @@ from infrastructure.providers.http import (
     HttpxAsyncHttpTransport,
 )
 from services.context.snapshot import ContextSnapshot
+from services.model.deadline import stream_with_wall_clock_deadline
 from services.model.stream import ModelStreamEvent
 from services.model.types import ModelUsage, ProviderError
 from services.tools.types import ToolCall
@@ -43,10 +44,22 @@ class OpenAICompatibleChatCompletionsClient:
         self,
         snapshot: ContextSnapshot,
     ) -> AsyncIterator[ModelStreamEvent]:
+        async for event in stream_with_wall_clock_deadline(
+            self._stream_without_deadline(snapshot),
+            timeout_seconds=self.config.model_call_timeout_seconds,
+            provider_id=self.config.provider_id,
+        ):
+            yield event
+
+    async def _stream_without_deadline(
+        self,
+        snapshot: ContextSnapshot,
+    ) -> AsyncIterator[ModelStreamEvent]:
         if not self.config.model:
             raise self._configuration_error("A model must be configured before calling chat completions.")
         payload = {**self._build_payload(snapshot), "stream": True}
         final_text_parts: list[str] = []
+        reasoning_text_parts: list[str] = []
         tool_accumulators: dict[int, _ToolCallAccumulator] = {}
         stop_reason: str | None = None
         usage: ModelUsage | None = None
@@ -81,6 +94,11 @@ class OpenAICompatibleChatCompletionsClient:
                 final_text_parts.append(content)
                 yield ModelStreamEvent.content_delta(content)
 
+            reasoning_text = _reasoning_text_from_delta(delta)
+            if reasoning_text:
+                reasoning_text_parts.append(reasoning_text)
+                yield ModelStreamEvent.reasoning_delta(reasoning_text)
+
             raw_tool_calls = delta.get("tool_calls")
             if isinstance(raw_tool_calls, list):
                 for raw_delta in raw_tool_calls:
@@ -110,6 +128,7 @@ class OpenAICompatibleChatCompletionsClient:
         yield ModelStreamEvent.message_completed(
             assistant_message=assistant_message,
             final_text=final_text,
+            reasoning_text="".join(reasoning_text_parts),
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             usage=usage,
@@ -134,6 +153,11 @@ class OpenAICompatibleChatCompletionsClient:
             max_output_tokens = request_overrides.get("max_output_tokens")
             if isinstance(max_output_tokens, int) and max_output_tokens > 0:
                 payload["max_tokens"] = max_output_tokens
+        structured_output = snapshot.usage_hints.get("structured_output")
+        if isinstance(structured_output, dict):
+            response_format = _structured_output_response_format(structured_output)
+            if response_format is not None:
+                payload["response_format"] = response_format
         return payload
 
     def _headers(self) -> dict[str, str]:
@@ -291,11 +315,36 @@ def _arguments_delta_chars(raw_delta: dict[str, Any]) -> int:
     return len(arguments) if isinstance(arguments, str) else 0
 
 
+def _reasoning_text_from_delta(delta: dict[str, Any]) -> str:
+    """Read only provider-visible reasoning fields exposed by the stream."""
+
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = delta.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _structured_output_response_format(value: dict[str, Any]) -> dict[str, Any] | None:
+    name = value.get("name")
+    schema = value.get("schema")
+    if not isinstance(name, str) or not name or not isinstance(schema, dict):
+        return None
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": value.get("strict") is not False,
+            "schema": schema,
+        },
+    }
+
+
 def _project_messages(messages: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
     projected: list[dict[str, Any]] = []
     for message in messages:
         if message.get("role") == "tool_result":
-            # OneCode 内部存 provider-neutral 的 tool_result；
+            # Nervure 内部存 provider-neutral 的 tool_result；
             # Chat Completions wire format 需要 role="tool"。
             projected.append(
                 {
@@ -317,10 +366,34 @@ def _parse_usage(usage: Any) -> ModelUsage | None:
     prompt_details = usage.get("prompt_tokens_details")
     if not isinstance(prompt_details, dict):
         prompt_details = {}
+    completion_details = usage.get("completion_tokens_details")
+    if not isinstance(completion_details, dict):
+        completion_details = {}
+    output_details = usage.get("output_tokens_details")
+    if not isinstance(output_details, dict):
+        output_details = {}
+    output_tokens = _int_or_zero(usage.get("completion_tokens"))
+    reasoning_tokens = _first_int(
+        completion_details.get("reasoning_tokens"),
+        output_details.get("reasoning_tokens"),
+        usage.get("reasoning_tokens"),
+    )
+    visible_output_tokens = _first_int(
+        completion_details.get("visible_output_tokens"),
+        output_details.get("visible_output_tokens"),
+        usage.get("visible_output_tokens"),
+    )
+    # OpenAI-compatible Chat Completions report completion_tokens as the
+    # total completion budget. When reasoning_tokens is explicitly returned,
+    # the remainder is the only safe visible-output derivation available.
+    if visible_output_tokens is None and reasoning_tokens is not None:
+        visible_output_tokens = max(0, output_tokens - reasoning_tokens)
     return ModelUsage(
         input_tokens=_int_or_zero(usage.get("prompt_tokens")),
-        output_tokens=_int_or_zero(usage.get("completion_tokens")),
+        output_tokens=output_tokens,
         cache_read_input_tokens=_int_or_zero(prompt_details.get("cached_tokens")),
+        reasoning_tokens=reasoning_tokens,
+        visible_output_tokens=visible_output_tokens,
     )
 
 
@@ -334,6 +407,13 @@ def _string_or_none(value: Any) -> str | None:
 
 def _int_or_zero(value: Any) -> int:
     return value if isinstance(value, int) else 0
+
+
+def _first_int(*values: Any) -> int | None:
+    for value in values:
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
 
 
 def _is_output_interrupted_stop_reason(stop_reason: str | None) -> bool:

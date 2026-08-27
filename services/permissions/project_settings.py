@@ -1,4 +1,4 @@
-"""Project-level permission settings stored in .onecode/settings.json."""
+"""Project-level permission settings stored in .nervure/settings.json (legacy .onecode compatible)."""
 
 from __future__ import annotations
 

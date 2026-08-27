@@ -12,6 +12,7 @@ from core.loop import AgentLoop
 from core.runtime_state import PermissionMode, RuntimeState
 from services.context.message_store import MessageStore
 from services.context.current_model_context import CurrentModelContext
+from services.context.snapshot import ContextSnapshot
 from services.guard import SandboxGuard
 from services.model.client import ModelClient
 from services.observability import TraceRecorder
@@ -19,6 +20,7 @@ from services.permissions import PermissionPolicy, PermissionPrompter
 from services.subagents.definitions import get_agent_definition
 from services.subagents.forking import build_forked_messages
 from services.subagents.types import AgentDefinition, SubagentRequest, SubagentResult
+from services.subagents.profiles import get_agent_profile
 from services.tools.executor import RegistryToolExecutor
 from services.tools.registry import ToolRegistry
 from services.tools.types import ToolDescriptor
@@ -68,12 +70,14 @@ class SubagentRunner:
             )
         is_fork = request.subagent_type is None
         is_compact = _is_compact_request(request)
-        is_session_memory_extraction = _is_session_memory_extraction_request(request)
         is_long_term_memory_extraction = _is_long_term_memory_extraction_request(request)
         is_background_agent = _is_background_agent_request(request)
         child_state = RuntimeState(
             max_turns=_request_max_turns(request) or definition.max_turns or 20
         )
+        if request.profile:
+            child_state.metadata["agent_profile"] = request.profile
+            self._trace_recorder.event("agent_profile_selected", {"profile": request.profile, "purpose": definition.when_to_use})
         _copy_shared_runtime_metadata(request, child_state)
         # The agent tool must never recurse into another agent (fork, explore,
         # memory extraction, etc). Plan mode hides the agent tool from regular
@@ -105,16 +109,18 @@ class SubagentRunner:
             child_state.metadata["is_fork_child"] = True
         if is_compact:
             child_state.metadata["compact_child"] = True
-        if is_session_memory_extraction:
-            self._configure_memory_extraction_child(child_state, request)
         if is_long_term_memory_extraction:
             self._configure_long_term_memory_extraction_child(child_state, request)
         child_store = MessageStore.ephemeral(session_id=child_state.session_id)
+        fork_snapshot = (
+            self._current_model_context.snapshot_copy() if is_fork else None
+        )
         seed_result = self._seed_child_messages(
             child_store,
             definition,
             request,
             is_fork=is_fork,
+            snapshot=fork_snapshot,
         )
         if seed_result is not None:
             return seed_result
@@ -123,13 +129,16 @@ class SubagentRunner:
             _child_descriptors(
                 definition,
                 self._base_descriptors,
-                session_memory_extraction=is_session_memory_extraction,
                 long_term_memory_extraction=is_long_term_memory_extraction,
                 compact=is_compact,
             ),
             permission_policy=self._permission_policy,
         )
-        prompt_assembler = self._prompt_assembler(definition, is_fork=is_fork)
+        prompt_assembler = self._prompt_assembler(
+            definition,
+            is_fork=is_fork,
+            snapshot=fork_snapshot,
+        )
         context_engine = ContextEngine(
             child_store,
             prompt_assembler=prompt_assembler,
@@ -161,9 +170,6 @@ class SubagentRunner:
             definition,
             request,
             is_fork=is_fork,
-            is_memory_extraction=(
-                is_session_memory_extraction or is_long_term_memory_extraction
-            ),
         )
 
     async def run_skill(
@@ -179,7 +185,7 @@ class SubagentRunner:
         definition = AgentDefinition(
             agent_type=f"skill:{skill.name}",
             when_to_use=skill.when_to_use or skill.description,
-            system_prompt="You are a clean OneCode child agent running one loaded skill.",
+            system_prompt="You are a clean Nervure child agent running one loaded skill.",
             tools=skill.allowed_tools or ("*",),
             disallowed_tools=("agent", "skill"),
             max_turns=20,
@@ -233,30 +239,7 @@ class SubagentRunner:
             definition,
             request,
             is_fork=False,
-            is_memory_extraction=False,
         )
-
-    def _configure_memory_extraction_child(
-        self,
-        child_state: RuntimeState,
-        request: SubagentRequest,
-    ) -> None:
-        """Mark the child as an internal writer for one session memory file."""
-
-        allowed_path = request.metadata.get("allowed_memory_path")
-        if not isinstance(allowed_path, str) or not allowed_path:
-            return
-        normalized = str(Path(allowed_path).resolve())
-        child_state.metadata["memory_extraction_agent"] = True
-        child_state.metadata["allowed_memory_path"] = normalized
-        child_state.metadata["hidden_tools"] = {
-            "agent",
-            "bash",
-            "read_file",
-            "grep",
-            "glob",
-        }
-        child_state.metadata["files_read"] = {normalized}
 
     def _configure_long_term_memory_extraction_child(
         self,
@@ -282,6 +265,9 @@ class SubagentRunner:
         request: SubagentRequest,
     ) -> AgentDefinition | None:
         # Omitted subagent_type is the explicit fork signal for the first version.
+        profile = get_agent_profile(request.profile)
+        if profile is not None:
+            return profile.to_definition()
         return get_agent_definition(request.subagent_type or "fork")
 
     def _seed_child_messages(
@@ -291,20 +277,20 @@ class SubagentRunner:
         request: SubagentRequest,
         *,
         is_fork: bool,
+        snapshot: ContextSnapshot | None,
     ) -> SubagentResult | None:
         # Seed before continuing the child loop so fork does not duplicate prompts.
         if not is_fork:
             child_store.seed_messages(({"role": "user", "content": request.prompt},))
             return None
-        snapshot = self._current_model_context.snapshot
         if snapshot is None:
-            return self._error_result(
-                agent_type=definition.agent_type,
-                message="Fork subagent requires the parent model snapshot.",
-                error="fork_context_unavailable",
-            )
+            # A fork can be requested during startup/recovery before a parent
+            # model call has populated CurrentModelContext. Continue with only
+            # the explicit directive; never reconstruct the full transcript.
+            child_store.seed_messages(({"role": "user", "content": request.prompt},))
+            return None
         forked_messages = build_forked_messages(
-            self._parent_message_store.current_messages(),
+            snapshot.messages,
             request.prompt,
         )
         child_store.seed_messages(forked_messages)
@@ -315,10 +301,10 @@ class SubagentRunner:
         definition: AgentDefinition,
         *,
         is_fork: bool,
+        snapshot: ContextSnapshot | None,
     ) -> StaticPromptAssembler:
         # Fork must inherit the exact bytes already rendered for the parent turn.
         if is_fork:
-            snapshot = self._current_model_context.snapshot
             return StaticPromptAssembler(snapshot.system_prompt if snapshot else "")
         return StaticPromptAssembler(definition.system_prompt)
 
@@ -331,7 +317,6 @@ class SubagentRunner:
         request: SubagentRequest,
         *,
         is_fork: bool,
-        is_memory_extraction: bool,
     ) -> SubagentResult:
         started = perf_counter()
         self._trace_recorder.event(
@@ -360,6 +345,17 @@ class SubagentRunner:
                     "child_session_id": child_state.session_id,
                     "error_type": type(exc).__name__,
                     "error_message": str(exc),
+                    "model_calls": child_state.turn_count,
+                    "input_tokens": child_state.usage.input_tokens,
+                    "cache_read_input_tokens": child_state.usage.cache_read_input_tokens,
+                    "uncached_input_tokens": max(
+                        0,
+                        child_state.usage.input_tokens
+                        - child_state.usage.cache_read_input_tokens,
+                    ),
+                    "output_tokens": child_state.usage.output_tokens,
+                    "reasoning_tokens": child_state.usage.reasoning_tokens,
+                    "visible_output_tokens": child_state.usage.visible_output_tokens,
                 },
             )
             return self._error_result(
@@ -394,8 +390,27 @@ class SubagentRunner:
                 "child_session_id": result.session_id,
                 "transition": result.transition,
                 "tool_result_count": result.tool_result_count,
+                "model_calls": child_state.turn_count,
                 "input_tokens": result.usage.input_tokens if result.usage else 0,
+                "cache_read_input_tokens": (
+                    result.usage.cache_read_input_tokens if result.usage else 0
+                ),
+                "uncached_input_tokens": (
+                    max(
+                        0,
+                        result.usage.input_tokens
+                        - result.usage.cache_read_input_tokens,
+                    )
+                    if result.usage
+                    else 0
+                ),
                 "output_tokens": result.usage.output_tokens if result.usage else 0,
+                "reasoning_tokens": (
+                    result.usage.reasoning_tokens if result.usage else None
+                ),
+                "visible_output_tokens": (
+                    result.usage.visible_output_tokens if result.usage else None
+                ),
                 "duration_ms": round((perf_counter() - started) * 1000, 3),
             },
         )
@@ -424,7 +439,6 @@ def _child_descriptors(
     definition: AgentDefinition,
     base_descriptors: tuple[ToolDescriptor, ...],
     *,
-    session_memory_extraction: bool = False,
     long_term_memory_extraction: bool = False,
     compact: bool = False,
 ) -> tuple[ToolDescriptor, ...]:
@@ -433,12 +447,6 @@ def _child_descriptors(
         # model literally cannot call read/edit/bash. Capability is enforced by the
         # empty registry rather than prompt text.
         return ()
-    if session_memory_extraction:
-        return tuple(
-            descriptor
-            for descriptor in base_descriptors
-            if descriptor.name == "edit_file"
-        )
     if long_term_memory_extraction:
         allowed = {"read_file", "grep", "glob", "write_file", "edit_file"}
         return tuple(
@@ -467,10 +475,6 @@ def _is_explore_request(request: SubagentRequest) -> bool:
     return request.subagent_type == "explore" or request.metadata.get(
         "purpose"
     ) == "plan_explore"
-
-
-def _is_session_memory_extraction_request(request: SubagentRequest) -> bool:
-    return request.metadata.get("purpose") == "session_memory_extraction"
 
 
 def _is_long_term_memory_extraction_request(request: SubagentRequest) -> bool:
@@ -521,7 +525,9 @@ def _skill_child_prompt(skill: SkillCommand, args: str) -> str:
     if root:
         content = (
             f"Base directory for this skill: {root}\n\n"
-            + content.replace("${ONECODE_SKILL_DIR}", root)
+            + content.replace("${NERVURE_SKILL_DIR}", root).replace(
+                "${ONECODE_SKILL_DIR}", root
+            )
         )
     return (
         f"[skill loaded: {skill.name}]\n"

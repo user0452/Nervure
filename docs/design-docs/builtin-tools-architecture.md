@@ -22,6 +22,7 @@ tools/<tool_name>/
 | `write_file` | `file_path`、`content` | 否 | 是 | 否 | `file/write` | 同上 |
 | `glob` | `pattern`、`path`、`head_limit`、`offset` | 是 | 否 | 是 | `directory/list` | 100k、不持久化 |
 | `grep` | `pattern`、`path`、`glob`、`output_mode`、上下文/大小写/分页 | 是 | 否 | 是 | `directory/read` | 20k、持久化 |
+| `repo_map` | `path`、`max_depth` | 是 | 否 | 是 | `directory/list` | 30k、不持久化 |
 | `bash` | `command`、`timeout_ms`、`description`、`run_in_background` | 视命令 | 视命令 | 只读命令为是 | `command/execute` 或派生文件 target | 30k、不持久化 |
 | `agent` | `prompt`、`subagent_type`、`run_in_background` | 是 | 否 | 否 | `session_state/mutate_state` | 默认 50k |
 | `skill` | `skill`、`args` | 否 | 否 | 否 | `session_state/skill_load` | 100k、不持久化 |
@@ -43,7 +44,9 @@ MCP 工具在运行时动态生成（非 `tools/` 目录），见 `mcp-architect
 
 ## 搜索工具
 
-`glob` 用 `root.rglob("*")` + fnmatch 发现文件，对每个命中文件做 read guard，按 mtime 降序分页。`grep` 调用外部 `rg` 搜索内容，排除 VCS 目录，对搜索根与结果做 guard 过滤，支持 `content`/`files_with_matches`/`count` 三种 output mode，ripgrep 失败转为结构化错误，20KB 预算超出时持久化。
+`glob` 用受排除目录剪枝的 `os.walk` + fnmatch 发现文件，对每个命中文件做 read guard，按 mtime 降序分页。`grep` 调用外部 `rg` 搜索内容，使用 `!**/<dir>/**` 排除嵌套 VCS/生成目录；显式 `path` 指向被排除目录时仍可检查该根，普通隐藏/config 文件不因 `--hidden` 被整体过滤。它对搜索根与结果做 guard 过滤，支持 `content`/`files_with_matches`/`count` 三种 output mode，ripgrep 失败转为结构化错误，20KB 预算超出时持久化。裸 `cache` 目录不作为默认排除项（过于宽泛），仅保留 `.cache` 等明确生成目录。
+
+`repo_map` 是 repository orientation 工具的 V1：只扫描 Python 文件并使用标准库 `ast` 提取相对路径、顶层 class/function、class method 和简洁 signature。它跳过常见生成/状态目录，单文件语法错误只产生 warning，并在文件、symbol 和字符预算处确定性截断。它不做跨文件引用分析。`symbol_search` 是 focused Python definition lookup：当类、函数或方法名已知/疑似但文件位置未知时定位定义；它不搜索 usages、imports 或 call graph。
 
 ## bash
 

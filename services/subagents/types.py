@@ -30,6 +30,7 @@ class SubagentRequest:
     subagent_type: str | None
     parent_session_id: str
     parent_tool_call_id: str
+    profile: str | None = None
     mode: SubagentRunMode | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

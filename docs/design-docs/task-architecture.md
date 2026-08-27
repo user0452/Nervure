@@ -48,7 +48,7 @@ flowchart TD
   Branch -->|completed| Hook2["TaskCompleted hook → 阻断则阻止"]
   Branch -->|其它| Up["update_task / block_task"]
   List["task_list"] --> Filter["过滤 metadata._internal"]
-  Store --> File[".onecode/tasks/&lt;task_list_id&gt;/&lt;task_id&gt;.json"]
+  Store --> File[".nervure/tasks/&lt;task_list_id&gt;/&lt;task_id&gt;.json"]
 ```
 
 ## 关键机制
@@ -67,7 +67,7 @@ flowchart TD
 
 ## 持久化路径
 
-- task 根目录：`{workspace}/.onecode/tasks/`
+- task 根目录：`{workspace}/.nervure/tasks/`（兼容读取旧 `.onecode/tasks/`）
 - 每 task list：`{root}/<task_list_id>/<task_id>.json`，递增水位线 `.highwatermark`
 
 ## 当前状态

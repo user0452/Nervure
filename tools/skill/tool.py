@@ -1,4 +1,4 @@
-"""Tool descriptor for loading OneCode skills on demand."""
+"""Tool descriptor for loading Nervure skills on demand."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def descriptor(
 ) -> ToolDescriptor:
     return ToolDescriptor(
         name="skill",
-        description="Load and execute a OneCode skill by name.",
+        description="Load and execute a Nervure skill by name.",
         input_schema=INPUT_SCHEMA,
         handler=_handler_for(skill_provider, cwd, fork_runner),
         prompt=PROMPT,
@@ -198,7 +198,9 @@ def _expanded_content(command: SkillCommand) -> str:
     root_text = str(command.root)
     return (
         f"Base directory for this skill: {root_text}\n\n"
-        + content.replace("${ONECODE_SKILL_DIR}", root_text)
+        + content.replace("${NERVURE_SKILL_DIR}", root_text).replace(
+            "${ONECODE_SKILL_DIR}", root_text
+        )
     )
 
 

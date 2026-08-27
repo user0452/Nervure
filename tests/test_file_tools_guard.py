@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
@@ -149,6 +150,29 @@ def test_read_file_returns_line_numbered_workspace_content(tmp_path: Path) -> No
     assert cached.content == "one\ntwo\nthree\n"
     assert cached.partial is True
     assert cached.mtime_ns == target.stat().st_mtime_ns
+
+
+def test_file_state_cache_detects_same_size_edit_with_unchanged_mtime(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "note.txt"
+    target.write_text("one\ntwo\n", encoding="utf-8")
+
+    from services.tools.file_state import FileStateCache
+
+    cache = FileStateCache()
+    cache.snapshot_path(target)
+    original_stat = target.stat()
+
+    # Simulate a fast external edit on a filesystem whose timestamp
+    # resolution makes the two writes indistinguishable by mtime alone.
+    target.write_text("ONE\nTWO\n", encoding="utf-8")
+    os.utime(target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+    changed = cache.changed_text_files()
+
+    assert len(changed) == 1
+    assert "+ONE" in changed[0].diff
 
 
 def test_read_file_replaces_invalid_utf8_bytes(tmp_path: Path) -> None:

@@ -13,11 +13,11 @@ from ui.cli.views.common import display_path, key_value_table, titled_section
 
 def render_banner(runtime: CliRuntime) -> Table:
     # 左列彩色小猫吉祥物，右列产品名/工作区/模型信息，双列网格无边框。
-    mascot = Text(MASCOT_CAT, style="onecode.mascot")
+    mascot = Text(MASCOT_CAT, style="nervure.mascot")
     info = Group(
-        Text("OneCode", style="onecode.title"),
-        Text(str(runtime.workspace), style="onecode.path"),
-        Text(runtime.model, style="onecode.model"),
+        Text("Nervure", style="nervure.title"),
+        Text(str(runtime.workspace), style="nervure.path"),
+        Text(runtime.model, style="nervure.model"),
     )
     grid = Table.grid(padding=(0, 2))
     grid.add_column()
@@ -38,6 +38,11 @@ def render_status(runtime: CliRuntime) -> Group:
     table.add_row("session", runtime.state.session_id)
     table.add_row("provider", runtime.provider_label)
     table.add_row("model", runtime.model)
+    table.add_row("permission mode", runtime.state.permission_mode.value)
+    table.add_row(
+        "hitl",
+        runtime.state.interaction.kind.value if runtime.state.interaction is not None else "idle",
+    )
     table.add_row("turns", _turns_summary(runtime))
     table.add_row("last transition", transition)
     table.add_row(
@@ -66,7 +71,7 @@ def render_status(runtime: CliRuntime) -> Group:
     table.add_row("background tasks", _background_task_summary(runtime))
     table.add_row("memory", _memory_summary(runtime))
     table.add_row("compaction", _compaction_summary(runtime))
-    return titled_section("Status", table, style="onecode.info")
+    return titled_section("Status", table, style="nervure.info")
 
 
 def render_usage(runtime: CliRuntime) -> Group:
@@ -99,7 +104,7 @@ def render_usage(runtime: CliRuntime) -> Group:
         )
     else:
         table.add_row("last compact", "none")
-    return titled_section("Usage", table, style="onecode.metric")
+    return titled_section("Usage", table, style="nervure.metric")
 
 
 def _turns_summary(runtime: CliRuntime) -> str:
@@ -141,14 +146,10 @@ def _background_task_summary(runtime: CliRuntime) -> str:
 
 
 def _memory_summary(runtime: CliRuntime) -> str:
-    session = "session=disabled"
-    if runtime.session_memory_store is not None:
-        memory = runtime.session_memory_store.read()
-        session = "session=present" if memory is not None else "session=missing"
     store = runtime.long_term_memory_store
     if store is None:
-        return f"{session} long-term=disabled"
-    return f"{session} long-term topics={len(store.scan())}"
+        return "long-term=disabled"
+    return f"long-term topics={len(store.scan())}"
 
 
 def _compaction_summary(runtime: CliRuntime) -> str:

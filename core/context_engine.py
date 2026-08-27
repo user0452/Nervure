@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Awaitable, Iterable, Protocol
 
@@ -57,6 +58,18 @@ class StaticPromptAssembler:
 class EmptyToolSchemaProvider:
     def tool_schemas(self, state: RuntimeState) -> tuple[dict[str, Any], ...]:
         return ()
+
+
+class StaticToolSchemaProvider:
+    """Expose a frozen copy of an already-rendered tool schema list."""
+
+    def __init__(self, tool_schemas: Iterable[dict[str, Any]]) -> None:
+        self._tool_schemas = tuple(deepcopy(tuple(tool_schemas)))
+
+    def tool_schemas(self, state: RuntimeState) -> tuple[dict[str, Any], ...]:
+        # Each context build gets fresh nested dicts so child execution cannot
+        # mutate the snapshot that supplied the cacheable prefix.
+        return tuple(deepcopy(self._tool_schemas))
 
 
 class ContextEngine:

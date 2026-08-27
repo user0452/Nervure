@@ -42,6 +42,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ui.cli.terminal.activity import ActivityGroup
+
 if TYPE_CHECKING:
     from core.stream_events import AgentEvent
     from services.tools.types import ToolExecutionResult
@@ -111,6 +113,7 @@ class CommitKind:
 
     ASSISTANT_MARKDOWN = "assistant_markdown"
     TOOL_RESULT = "tool_result"
+    ACTIVITY_GROUP = "activity_group"
 
 
 @dataclass
@@ -146,6 +149,10 @@ class StaticCommit:
     def is_assistant_markdown(self) -> bool:
         return self.kind == CommitKind.ASSISTANT_MARKDOWN
 
+    @property
+    def is_activity_group(self) -> bool:
+        return self.kind == CommitKind.ACTIVITY_GROUP
+
 
 #: 旧 ``CompletedToolCommit`` 的别名,保留是为了不破坏正在用它的测
 #: 试;``pending_static_commits`` 列表现在直接持有
@@ -177,6 +184,17 @@ class CliStreamUiState:
     current_model_turn_index: int | None = None
     #: Active tool calls by ``call_id`` (insertion order preserved).
     tools: dict[str, StreamingToolUseState] = field(default_factory=dict)
+    #: Level-one activity groups keyed by the model invocation that created
+    #: them.  The group retains names/arguments only; result bodies remain in
+    #: tool-result checkpoints and the runtime transcript.
+    activity_groups: dict[str, ActivityGroup] = field(default_factory=dict)
+    #: True once a ready call with identifying input has progressed into an
+    #: activity group.  Legacy events without a ready call keep the old
+    #: active-tool fallback so partial provider streams remain readable.
+    activity_enabled: bool = False
+    #: Current-turn expansion state.  It is deliberately state-local and is
+    #: toggled by the dynamic application's non-typing shortcut.
+    activities_expanded: bool = False
     #: 工具 call_id → 所属 ``assistant_call_id`` 的映射。reducer 在
     #: 收到 ``tool_call_ready`` 时填充,``tool_result`` 时用来找到
     #: 提交入口。
@@ -239,6 +257,19 @@ class CliStreamUiState:
             for tool in self.tools.values()
             if tool.status in (ToolStatus.QUEUED, ToolStatus.RUNNING)
         )
+
+    def visible_activity_groups(self) -> list[ActivityGroup]:
+        """Return groups in model/event order for the dynamic view."""
+
+        return list(self.activity_groups.values())
+
+    def activity_group_for_tool(self, call_id: str) -> ActivityGroup | None:
+        """Find the activity group containing ``call_id``."""
+
+        for group in self.activity_groups.values():
+            if any(tool.call_id == call_id for tool in group.tools):
+                return group
+        return None
 
     def uncommitted_commits(self) -> list[StaticCommit]:
         """Return commits that have not yet been flushed to scrollback.

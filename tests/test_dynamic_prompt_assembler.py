@@ -113,6 +113,8 @@ def test_fixed_behavior_sections_are_ordered_before_dynamic_context(
     assert "prompt injection" in prompt
     assert "verify the behavior" in prompt
     assert "scoped to what the user asked for" in prompt
+    assert "brief user-facing progress updates" in prompt
+    assert "Before the first meaningful tool call" in prompt
     disallowed_reference_terms = (
         "Claude Code",
         "Anthropic",

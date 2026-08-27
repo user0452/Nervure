@@ -1,8 +1,8 @@
-# .onecode Directory Architecture
+# .nervure Directory Architecture
 
-本文描述项目级 `.onecode/` 目录的目标结构和职责边界。`.onecode/` 是 OneCode 在单个 workspace 内的运行时状态目录，承载会话恢复、上下文治理、项目级配置、长期记忆、任务图和本地缓存。
+本文描述项目级 `.nervure/` 目录的目标结构和职责边界。`.nervure/` 是 Nervure 在单个 workspace 内的运行时状态目录，承载会话恢复、上下文治理、项目级配置、长期记忆、任务图和本地缓存。
 
-它不是用户级全局配置目录。用户级配置、全局指令和全局 skill 应属于 `~/.onecode/`，不放进项目 `.onecode/`。
+它不是用户级全局配置目录。用户级配置、全局指令和全局 skill 应属于 `~/.nervure/`，不放进项目 `.nervure/`。
 
 ## 设计原则
 
@@ -11,14 +11,14 @@
 - 完整事实来源使用 append-only 或可重建文件，索引只作为缓存。
 - 大输出、trace、错误日志和 session memory 与 transcript 保持同 session 生命周期。
 - `tasks/` 和 `memory/` 不放入单个 session 目录，因为它们有跨会话或父子 agent 共享语义。
-- `.onecode/` 是受保护项目目录，工具访问必须继续经过 guard 和 permission policy。
+- `.nervure/` 是受保护项目目录，工具访问必须继续经过 guard 和 permission policy。
 
 ## 推荐目录结构
 
 ```text
-.onecode/
+.nervure/
   settings.json
-  ONECODE.md
+  NERVURE.md
   rules/
     *.md
 
@@ -61,7 +61,7 @@
 | 路径 | 职责 |
 |:---|:---|
 | `settings.json` | 项目级设置，例如权限规则、MCP trust、本地运行偏好。 |
-| `ONECODE.md` | 项目级指令记忆，参与 instruction memory 分层加载。 |
+| `NERVURE.md` | 项目级指令记忆，参与 instruction memory 分层加载。 |
 | `rules/*.md` | 项目级规则片段，按 instruction memory 规则加载。 |
 | `sessions/` | 所有可恢复会话的事实来源和会话局部 artifacts。 |
 | `tasks/` | durable task graph。以 `task_list_id` 分组，可被父子 agent 或多个 session 共享。 |
@@ -76,7 +76,7 @@
 每个用户可恢复会话使用一个目录：
 
 ```text
-.onecode/sessions/<session-id>/
+.nervure/sessions/<session-id>/
 ```
 
 该目录内的文件共享同一个 session 生命周期。删除该目录意味着删除该会话的 transcript、trace、错误日志、session memory、大工具结果和后台任务输出。
@@ -109,7 +109,7 @@
   "session_id": "<session-id>",
   "created_at": "2026-06-19T00:00:00Z",
   "updated_at": "2026-06-19T00:00:00Z",
-  "cwd": "D:\\study\\OneCode",
+  "cwd": "D:\\study\\Nervure",
   "model": "provider/model",
   "provider": "provider-name",
   "title": "first user prompt preview",
@@ -143,13 +143,13 @@
 `tasks/` 使用 `task_list_id` 分组，而不是 `session_id`：
 
 ```text
-.onecode/tasks/<task-list-id>/<task-id>.json
+.nervure/tasks/<task-list-id>/<task-id>.json
 ```
 
 原因：
 
 - 父子 agent 需要共享同一 task graph。
-- `ONECODE_TASK_LIST_ID` 可以让多个 runtime 显式共享任务。
+- `NERVURE_TASK_LIST_ID` 可以让多个 runtime 显式共享任务。
 - 未来跨会话恢复时，一个长期任务可能继续使用已有 task list。
 
 session 与 task list 的关联应记录在 `sessions/<session-id>/session.json` 和 runtime metadata 中。默认情况下，`task_list_id` 可以等于 `session_id`，但存储结构不应假设二者永远相同。
@@ -159,8 +159,8 @@ session 与 task list 的关联应记录在 `sessions/<session-id>/session.json`
 `memory/` 是项目级长期记忆：
 
 ```text
-.onecode/memory/MEMORY.md
-.onecode/memory/<topic>.md
+.nervure/memory/MEMORY.md
+.nervure/memory/<topic>.md
 ```
 
 它服务跨会话的项目事实、用户偏好、反馈和参考材料。它不属于某个 session，不能放进 `sessions/<session-id>/`。
@@ -169,7 +169,7 @@ session 与 task list 的关联应记录在 `sessions/<session-id>/session.json`
 
 ## Plans 目录
 
-`.onecode/plans/` 可用于运行时保存的临时计划、用户手动保存的计划或 future plan-mode 输出。
+`.nervure/plans/` 可用于运行时保存的临时计划、用户手动保存的计划或 future plan-mode 输出。
 
 仓库级架构和执行计划仍放在：
 
@@ -178,35 +178,35 @@ docs/exec-plans/active/
 docs/exec-plans/completed/
 ```
 
-`.onecode/plans/` 不应替代项目文档中的 ExecPlan。若一个计划代表真实工程变更，应提升为 `docs/exec-plans/active/` 中的 ExecPlan。
+`.nervure/plans/` 不应替代项目文档中的 ExecPlan。若一个计划代表真实工程变更，应提升为 `docs/exec-plans/active/` 中的 ExecPlan。
 
 ## Global 与 Project 边界
 
-项目 `.onecode/` 只保存当前 workspace 的状态。用户级状态属于：
+项目 `.nervure/` 只保存当前 workspace 的状态。用户级状态属于：
 
 ```text
-~/.onecode/
+~/.nervure/
   settings.json
-  ONECODE.md
+  NERVURE.md
   rules/
   skills/
   plugins/
   cache/
 ```
 
-用户级目录可以承载全局配置、全局指令、用户 skills、插件和跨项目缓存。项目 `.onecode/` 不应通过 `projects/<project-key>/` 再嵌套项目，因为项目隔离已经由 workspace-local `.onecode/` 提供。
+用户级目录可以承载全局配置、全局指令、用户 skills、插件和跨项目缓存。项目 `.nervure/` 不应通过 `projects/<project-key>/` 再嵌套项目，因为项目隔离已经由 workspace-local `.nervure/` 提供。
 
-如果未来需要全局会话索引，可在 `~/.onecode/projects/<project-key>/` 建立到项目 `.onecode/sessions/` 的索引或引用，但不要把项目 transcript 的唯一事实来源迁移到用户级目录。
+如果未来需要全局会话索引，可在 `~/.nervure/projects/<project-key>/` 建立到项目 `.nervure/sessions/` 的索引或引用，但不要把项目 transcript 的唯一事实来源迁移到用户级目录。
 
 ## 当前实现迁移说明
 
 目标 session 结构为：
 
 ```text
-.onecode/sessions/<session-id>/
+.nervure/sessions/<session-id>/
 ```
 
-迁移直接切换到新结构，不保留旧会话记录，不双读旧目录，也不提供自动迁移命令。实现应通过集中路径 helper 完成，避免在各模块散落字符串拼接。优先改造这些入口：
+新运行时统一写入 `.nervure/`；为避免破坏已有 workspace，读取路径保留 `.onecode/` 兼容 fallback。实现通过集中路径 helper 完成，避免在各模块散落品牌目录字符串。优先改造这些入口：
 
 - `JsonlTranscriptStore` 的 session root 解析。
 - trace 和 error log sink 的 session path。
@@ -216,13 +216,13 @@ docs/exec-plans/completed/
 - CLI resume 扫描和 target 解析。
 - subagent transcript root。
 
-`/resume` 只扫描：
+`/resume` 优先扫描：
 
 ```text
-.onecode/sessions/*/messages.jsonl
+.nervure/sessions/*/messages.jsonl
 ```
 
-旧 `.onecode/<session-id>/messages.jsonl` 不再作为合法恢复目标。
+同时兼容已有 `.onecode/sessions/*/messages.jsonl`。更早期缺少 `sessions/` 层级的 `.onecode/<session-id>/messages.jsonl` 不再作为合法恢复目标。
 
 ## 清理策略
 
@@ -235,7 +235,7 @@ docs/exec-plans/completed/
 
 ## 安全边界
 
-`.onecode/` 是受保护目录。默认行为：
+`.nervure/` 是受保护目录。默认行为：
 
 - 读取 `sessions/<session-id>/tool-results/` 可作为恢复和上下文治理例外。
 - 写入 `memory/` 只应由明确授权的长期记忆流程或用户请求触发。

@@ -7,9 +7,9 @@
 
 ## Purpose / Big Picture
 
-实现完成后，OneCode 用户可以在 CLI 中输入 `/plan` 进入正式计划模式。计划模式会让 agent 在写业务代码前先只读探索代码库、把计划写入 `.onecode/plans/` 下的 Markdown 文件、用结构化问题与用户面试式澄清需求，并在调用 `exit_plan_mode` 后把计划提交给用户审批。只有用户批准后，OneCode 才恢复进入计划模式前的权限模式并开始实施。
+实现完成后，Nervure 用户可以在 CLI 中输入 `/plan` 进入正式计划模式。计划模式会让 agent 在写业务代码前先只读探索代码库、把计划写入 `.onecode/plans/` 下的 Markdown 文件、用结构化问题与用户面试式澄清需求，并在调用 `exit_plan_mode` 后把计划提交给用户审批。只有用户批准后，Nervure 才恢复进入计划模式前的权限模式并开始实施。
 
-这不是临时 MVP，而是一次重构性质的完整实现。计划模式会成为 OneCode 的一等运行时模式：核心状态、权限裁剪、工具可见性、计划文件存储、附件投影、CLI `/plan` 命令、计划审批 UI、只读 explore subagent 和冲突感知并发调度都围绕同一套正式契约实现。旧的 plan-mode 占位 attachment 和任何隐式 `metadata` 协议要被删除或替换，不保留迁移式兼容路径。
+这不是临时 MVP，而是一次重构性质的完整实现。计划模式会成为 Nervure 的一等运行时模式：核心状态、权限裁剪、工具可见性、计划文件存储、附件投影、CLI `/plan` 命令、计划审批 UI、只读 explore subagent 和冲突感知并发调度都围绕同一套正式契约实现。旧的 plan-mode 占位 attachment 和任何隐式 `metadata` 协议要被删除或替换，不保留迁移式兼容路径。
 
 
 ## Progress
@@ -36,7 +36,7 @@
 - Observation: 当前 `services/attachments/projector.py` 已有 `plan_mode` attachment 分支，但它只是把 `content` 包进 `[plan mode attachment]`，没有计划模式语义。
   Evidence: 搜索 `rg -n "plan_mode" services tests` 可看到 `tests/test_attachment_projector.py` 只断言 raw attachment role 不暴露给 provider，没有断言任何计划工作流。
 
-- Observation: OneCode 已有 `read_only_agent` 硬限制和 subagent runner，适合作为 explore agent 只读执行的基础，但当前该状态主要通过 `RuntimeState.metadata` 表达。
+- Observation: Nervure 已有 `read_only_agent` 硬限制和 subagent runner，适合作为 explore agent 只读执行的基础，但当前该状态主要通过 `RuntimeState.metadata` 表达。
   Evidence: 搜索 `rg -n "read_only_agent" services tools tests` 可看到 `services/permissions/policy.py` 会拒绝只读 agent 的非只读或文件修改工具调用。
 
 - Observation: Claude Code 的计划模式不是普通 prompt，而是由 `EnterPlanMode`、`ExitPlanMode`、`AskUserQuestion`、计划文件、permission mode、系统 attachment 和 TUI 审批共同构成的状态机。
@@ -65,7 +65,7 @@
   Date/Author: 2026-06-22 / Codex
 
 - Decision: explore agent 复用现有 subagent 机制，但在 plan mode 下只能作为只读探索 agent 使用。
-  Rationale: OneCode 已有 `agent` 工具和 `SubagentRunner`，重复实现一套 agent 系统会破坏架构边界。完整实现应强化现有 subagent：计划模式父 agent 可以并行发起 explore agent，child runtime 继承 plan context 并受到只读权限硬限制。
+  Rationale: Nervure 已有 `agent` 工具和 `SubagentRunner`，重复实现一套 agent 系统会破坏架构边界。完整实现应强化现有 subagent：计划模式父 agent 可以并行发起 explore agent，child runtime 继承 plan context 并受到只读权限硬限制。
   Date/Author: 2026-06-22 / Codex
 
 - Decision: explore agent 并发由目标冲突判断决定，不用单一 `concurrency_safe` 布尔决定。
@@ -89,7 +89,7 @@
 
 ## Context and Orientation
 
-OneCode 是一个 Python code agent runtime。核心主循环在 `core/loop.py`，它只负责把用户输入追加到消息链、每轮构建模型上下文、调用模型、执行工具、写回工具结果并决定是否继续。任何新能力都不应该在主循环中硬编码工具名或 UI 逻辑。
+Nervure 是一个 Python code agent runtime。核心主循环在 `core/loop.py`，它只负责把用户输入追加到消息链、每轮构建模型上下文、调用模型、执行工具、写回工具结果并决定是否继续。任何新能力都不应该在主循环中硬编码工具名或 UI 逻辑。
 
 运行时状态在 `core/runtime_state.py`。当前 `RuntimeState` 有 `usage`、`turn_count`、`session_id` 和 `metadata` 等字段。计划模式实现必须在这里新增正式字段，例如 `permission_mode` 和 `plan`，而不是把计划模式放进 `metadata`。
 
@@ -116,23 +116,23 @@ Subagent 在 `services/subagents/` 和 `tools/agent/`。`tools/agent/tool.py` �
 
 `docs/references/Tools_full/EnterPlanModeTool/EnterPlanModeTool.ts` 展示进入计划模式的状态转换：拒绝 agent 子上下文调用、调用 `handlePlanModeTransition`、保存进入前模式、设置 mode 为 `plan`、在 tool result 中告诉模型进入只读计划流程。搜索关键词：`handlePlanModeTransition`、`prepareContextForPlanMode`、`setMode`、`mapToolResultToToolResultBlockParam`。
 
-`docs/references/Tools_full/EnterPlanModeTool/prompt.ts` 展示模型何时应该主动请求进入计划模式。OneCode 不必照搬文案，但应学习它区分复杂任务和简单任务的准则。搜索关键词：`When to Use This Tool`、`When NOT to Use This Tool`、`Important Notes`。
+`docs/references/Tools_full/EnterPlanModeTool/prompt.ts` 展示模型何时应该主动请求进入计划模式。Nervure 不必照搬文案，但应学习它区分复杂任务和简单任务的准则。搜索关键词：`When to Use This Tool`、`When NOT to Use This Tool`、`Important Notes`。
 
 `docs/references/Tools_full/ExitPlanModeTool/ExitPlanModeV2Tool.ts` 展示退出计划模式的核心机制：非 plan mode 调用要 validate 失败，真正退出前读取计划文件并请求用户确认，批准后恢复 `prePlanMode`，设置 `hasExitedPlanMode` 和 `needsPlanModeExitAttachment`，tool result 把批准后的计划返回模型。搜索关键词：`validateInput`、`checkPermissions`、`getPlanFilePath`、`getPlan`、`prePlanMode`、`setHasExitedPlanMode`、`setNeedsPlanModeExitAttachment`、`Approved Plan`。
 
 `docs/references/Tools_full/ExitPlanModeTool/prompt.ts` 展示 ExitPlanMode 的使用边界：只能在写完计划后请求审批，不能用于纯研究任务，也不能让 `AskUserQuestion` 代替审批。搜索关键词：`Before Using This Tool`、`Do NOT use AskUserQuestion`、`Examples`。
 
-`docs/references/Tools_full/AskUserQuestionTool/AskUserQuestionTool.tsx` 展示结构化用户提问工具：输入包括问题、短标题、选项、可选 preview，工具需要用户交互，结果把用户回答写回模型。OneCode 初版不需要 HTML preview，但要保留多问题、选项、自由输入和审批禁用边界。搜索关键词：`questionSchema`、`requiresUserInteraction`、`checkPermissions`、`answers`、`User has answered your questions`。
+`docs/references/Tools_full/AskUserQuestionTool/AskUserQuestionTool.tsx` 展示结构化用户提问工具：输入包括问题、短标题、选项、可选 preview，工具需要用户交互，结果把用户回答写回模型。Nervure 初版不需要 HTML preview，但要保留多问题、选项、自由输入和审批禁用边界。搜索关键词：`questionSchema`、`requiresUserInteraction`、`checkPermissions`、`answers`、`User has answered your questions`。
 
 `docs/references/Tools_full/AskUserQuestionTool/prompt.ts` 展示计划模式中提问工具的限制：用它澄清需求和选择方案，不用它请求计划是否通过。搜索关键词：`Plan mode note`、`Do NOT use this tool to ask`、`If you need plan approval`。
 
-`docs/references/ui/bootstrap/state.ts` 展示 Claude Code 把计划模式相关状态放在 bootstrap state 中，包括 `hasExitedPlanMode`、`needsPlanModeExitAttachment`、`planSlugCache` 和 `parentSessionId`。OneCode 应把这些概念放入 `RuntimeState` 的正式字段或 `services/plans` 状态对象中。搜索关键词：`hasExitedPlanMode`、`needsPlanModeExitAttachment`、`handlePlanModeTransition`、`planSlugCache`、`parentSessionId`。
+`docs/references/ui/bootstrap/state.ts` 展示 Claude Code 把计划模式相关状态放在 bootstrap state 中，包括 `hasExitedPlanMode`、`needsPlanModeExitAttachment`、`planSlugCache` 和 `parentSessionId`。Nervure 应把这些概念放入 `RuntimeState` 的正式字段或 `services/plans` 状态对象中。搜索关键词：`hasExitedPlanMode`、`needsPlanModeExitAttachment`、`handlePlanModeTransition`、`planSlugCache`、`parentSessionId`。
 
-`docs/references/ui/utils/plans.ts` 展示计划文件目录、slug、resume 恢复、fork 复制和 transcript fallback。OneCode 应学习其“计划文件有稳定 slug、fork 不共享同一文件、resume 能恢复计划内容”的机制，但路径改为 `.onecode/plans/`。搜索关键词：`getPlansDirectory`、`getPlanSlug`、`getPlanFilePath`、`copyPlanForResume`、`copyPlanForFork`、`recoverPlanFromMessages`、`plan_file_reference`。
+`docs/references/ui/utils/plans.ts` 展示计划文件目录、slug、resume 恢复、fork 复制和 transcript fallback。Nervure 应学习其“计划文件有稳定 slug、fork 不共享同一文件、resume 能恢复计划内容”的机制，但路径改为 `.onecode/plans/`。搜索关键词：`getPlansDirectory`、`getPlanSlug`、`getPlanFilePath`、`copyPlanForResume`、`copyPlanForFork`、`recoverPlanFromMessages`、`plan_file_reference`。
 
-`docs/references/ui/utils/messages.ts` 展示 plan-mode attachment 文案和面试式流程。OneCode 应优先采用 `getPlanModeInterviewInstructions()` 的思路：探索、更新计划、向用户提问，不把五阶段 agent-heavy 流程作为唯一工作流。搜索关键词：`getPlanModeInstructions`、`getPlanModeV2Instructions`、`getPlanModeInterviewInstructions`、`plan_mode_reentry`、`plan_mode_exit`、`Ending Your Turn`。
+`docs/references/ui/utils/messages.ts` 展示 plan-mode attachment 文案和面试式流程。Nervure 应优先采用 `getPlanModeInterviewInstructions()` 的思路：探索、更新计划、向用户提问，不把五阶段 agent-heavy 流程作为唯一工作流。搜索关键词：`getPlanModeInstructions`、`getPlanModeV2Instructions`、`getPlanModeInterviewInstructions`、`plan_mode_reentry`、`plan_mode_exit`、`Ending Your Turn`。
 
-`docs/references/Tools_full/services/tools/toolOrchestration.ts` 和 `docs/references/Tools_full/services/tools/StreamingToolExecutor.ts` 展示工具并发执行与按序产出结果的参考。OneCode 当前 executor 已有并发批次，但本计划要升级为目标冲突感知调度。搜索关键词：`partitionToolCalls`、`isConcurrencySafe`、`StreamingToolExecutor`、`canExecuteTool`、`getCompletedResults`。
+`docs/references/Tools_full/services/tools/toolOrchestration.ts` 和 `docs/references/Tools_full/services/tools/StreamingToolExecutor.ts` 展示工具并发执行与按序产出结果的参考。Nervure 当前 executor 已有并发批次，但本计划要升级为目标冲突感知调度。搜索关键词：`partitionToolCalls`、`isConcurrencySafe`、`StreamingToolExecutor`、`canExecuteTool`、`getCompletedResults`。
 
 
 ## Plan of Work
@@ -162,7 +162,7 @@ Subagent 在 `services/subagents/` 和 `tools/agent/`。`tools/agent/tool.py` �
 
 ## Concrete Steps
 
-所有命令都从仓库根目录 `D:\study\OneCode` 运行。
+所有命令都从仓库根目录 `D:\study\Nervure` 运行。
 
 实现前先确认当前工作树状态：
 

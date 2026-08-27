@@ -1,1 +1,1 @@
-"""Infrastructure adapters for OneCode."""
+"""Infrastructure adapters for Nervure."""

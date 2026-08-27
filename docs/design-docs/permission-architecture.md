@@ -83,13 +83,13 @@ flowchart TD
 
 ### 受保护目录与可疑路径
 
-`PROTECTED_PROJECT_DIRS = (.git, .vscode, .idea, .onecode)`，大小写不敏感按路径段匹配。例外：读取 `.onecode/sessions/<session_id>/tool-results/...`、`.onecode/memory/` 下的长期记忆路径。可疑 Windows 路径检测绝对 Windows 形态和保留设备名（`CON`/`PRN`/`AUX`/`NUL`/`COM1-9`/`LPT1-9`），仅在 guard 非 allow 时纳入 ask。
+`PROTECTED_PROJECT_DIRS = (.git, .vscode, .idea, .nervure, .onecode)`，大小写不敏感按路径段匹配。例外：读取 `.nervure/sessions/<session_id>/tool-results/...`（兼容旧 `.onecode/sessions/...`），以及当前或 legacy memory 目录下的长期记忆路径。可疑 Windows 路径检测绝对 Windows 形态和保留设备名（`CON`/`PRN`/`AUX`/`NUL`/`COM1-9`/`LPT1-9`），仅在 guard 非 allow 时纳入 ask。
 
 ### 特殊 agent 硬强制
 
 - `read_only_agent`：非只读或改文件系统的调用直接 deny。
 - `memory_extraction_agent`：必须有 `allowed_memory_path`，工具必须是 `edit_file`，单一 `file/write` target，且 `resolve_path(target) == resolve_path(allowed_memory_path)`，否则 deny；通过则 allow（绕过 ask）。
-- `long_term_memory_extraction_agent`：必须有 `allowed_memory_dir`；读工具（read_file/grep/glob）须只读且 guard 全 allow；写工具（write_file/edit_file）的 target 须是 `.onecode/memory/` 下的 `.md` 文件（`is_auto_memory_markdown_path`），否则 deny。
+- `long_term_memory_extraction_agent`：必须有 `allowed_memory_dir`；读工具（read_file/grep/glob）须只读且 guard 全 allow；写工具（write_file/edit_file）的 target 须是该 job 明确选定的 `.nervure/memory/` 或 legacy `.onecode/memory/` 下的 `.md` 文件，否则 deny。
 
 这些限制是代码边界，不依赖 prompt 文本。配置入口见 `subagent-architecture.md`。
 

@@ -39,9 +39,9 @@ def render_running() -> str:
 
 
 def render_assistant(text: str) -> str:
-    # assistant 回复统一带 onecode> 前缀（非流式路径；流式路径在 app 层单独加一次）。
+    # assistant 回复统一带 Nervure> 前缀（非流式路径；流式路径在 app 层单独加一次）。
     body = text if text else "(assistant returned no text)"
-    return f"onecode>\n{body}"
+    return f"Nervure>\n{body}"
 
 
 def render_assistant_delta(text: str) -> str:
@@ -55,22 +55,22 @@ def render_tool_result_summary(result: Any, *, workspace: Path | None = None) ->
 
 
 def render_error(message: str) -> Text:
-    return Text(f"{SYMBOLS.error} {message}", style="onecode.error")
+    return Text(f"{SYMBOLS.error} {message}", style="nervure.error")
 
 
 def render_text(message: str) -> Text:
     """Render a plain string inside a Text widget for consistent theming."""
 
-    return Text(message, style="onecode.dim")
+    return Text(message, style="nervure.dim")
 
 
 def render_tools(descriptors: Iterable[Any]) -> Group:
-    table = Table(box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("tool")
     table.add_column("description")
     for descriptor in descriptors:
         table.add_row(descriptor.name, descriptor.description)
-    return titled_section("Enabled tools", table, style="onecode.info")
+    return titled_section("Enabled tools", table, style="nervure.info")
 
 
 def render_tasks(
@@ -112,7 +112,7 @@ def render_mcp_status(runtime: CliRuntime, *, show_tools: bool = True) -> Group:
 
 def render_history(messages: Iterable[dict[str, Any]], *, start_index: int = 1) -> Group:
     items = list(messages)
-    table = Table(box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("#", no_wrap=True)
     table.add_column("role")
     table.add_column("detail")
@@ -120,12 +120,12 @@ def render_history(messages: Iterable[dict[str, Any]], *, start_index: int = 1) 
         table.add_row("-", "none", "Recent messages: none")
     for index, message in enumerate(items, start=start_index):
         table.add_row(str(index), _message_role(message), _message_detail(message))
-    return titled_section("Recent messages", table, style="onecode.info")
+    return titled_section("Recent messages", table, style="nervure.info")
 
 
 def render_trace(records: Iterable[dict[str, Any]]) -> Group:
     items = list(records)
-    table = Table(box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("timestamp")
     table.add_column("type")
     table.add_column("name")
@@ -153,16 +153,16 @@ def render_trace(records: Iterable[dict[str, Any]]) -> Group:
             preview(record.get("name")),
             detail,
         )
-    return titled_section("Recent trace", table, style="onecode.info")
+    return titled_section("Recent trace", table, style="nervure.info")
 
 
 def render_clear(old_session_id: str, new_session_id: str) -> Text:
     return Text(
         (
             f"{SYMBOLS.success} Started new session {new_session_id}. "
-            f"Previous session {old_session_id} is still in .onecode/sessions."
+            f"Previous session {old_session_id} remains available in Nervure session storage."
         ),
-        style="onecode.success",
+        style="nervure.success",
     )
 
 
@@ -172,18 +172,13 @@ def render_resume(session_id: str, messages_path: Path, workspace: Path) -> Text
             f"{SYMBOLS.success} Restored session {session_id} from "
             f"{display_path(messages_path, workspace)}."
         ),
-        style="onecode.success",
+        style="nervure.success",
     )
 
 
 def render_compact(result: Any, runtime: CliRuntime) -> Group:
-    memory_path = (
-        runtime.session_memory_store.path
-        if runtime.session_memory_store is not None
-        else None
-    )
     table = Table.grid(padding=(0, 2))
-    table.add_column(style="onecode.subtle", no_wrap=True)
+    table.add_column(style="nervure.subtle", no_wrap=True)
     table.add_column()
     table.add_row("trigger", getattr(result, "trigger").value)
     table.add_row(
@@ -195,9 +190,7 @@ def render_compact(result: Any, runtime: CliRuntime) -> Group:
         "transcript",
         display_path(runtime.message_store.transcript_store.messages_path, runtime.workspace),
     )
-    if memory_path is not None:
-        table.add_row("session memory", display_path(memory_path, runtime.workspace))
-    return titled_section("Compacted session", table, style="onecode.success")
+    return titled_section("Compacted session", table, style="nervure.success")
 
 
 def render_unknown_command(command: str) -> Text:

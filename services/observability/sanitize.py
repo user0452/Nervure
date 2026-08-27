@@ -7,12 +7,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+import re
 from typing import Any
 
 MAX_KEYS = 20
 MAX_STRING_CHARS = 240
 MAX_DEPTH = 2
 REDACTED = "[redacted]"
+_SENSITIVE_TEXT_PATTERNS = (
+    re.compile(
+        r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|secret)\s*[:=]\s*([^\s,;]+)"
+    ),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"),
+)
 
 SENSITIVE_KEY_PARTS = (
     "key",
@@ -21,6 +28,9 @@ SENSITIVE_KEY_PARTS = (
     "password",
     "authorization",
     "header",
+    "cookie",
+    "bearer",
+    "credential",
     "env",
     "content",
     "prompt",
@@ -34,9 +44,25 @@ SAFE_COUNTER_KEYS = {
     "output_tokens",
     "cache_read_input_tokens",
     "cache_creation_input_tokens",
+    "uncached_input_tokens",
+    "reasoning_tokens",
+    "reasoning_tokens_status",
+    "visible_output_tokens",
+    "estimated_tokens",
     "stdout_chars",
     "stderr_chars",
     "content_chars",
+}
+SAFE_DEBUG_TEXT_KEYS = {
+    "user_prompt",
+    "assistant_visible_text",
+    "provider_reasoning_text",
+    "tool_arguments",
+    "tool_result_text",
+}
+SAFE_HASH_KEYS = {
+    "system_prompt_hash",
+    "tool_schema_hash",
 }
 
 
@@ -44,18 +70,22 @@ def sanitize_attributes(
     attributes: Mapping[str, Any] | None,
     *,
     workspace: Path | None = None,
+    debug: bool = False,
 ) -> dict[str, Any]:
     if attributes is None:
         return {}
+    key_limit = 50 if debug else MAX_KEYS
     return {
         str(key)[:MAX_STRING_CHARS]: _sanitize_value(
             str(key),
             value,
             workspace=workspace,
             depth=0,
+            debug=debug,
+            key_limit=key_limit,
         )
         for index, (key, value) in enumerate(attributes.items())
-        if index < MAX_KEYS
+        if index < key_limit
     }
 
 
@@ -65,6 +95,8 @@ def _sanitize_value(
     *,
     workspace: Path | None,
     depth: int,
+    debug: bool,
+    key_limit: int,
 ) -> Any:
     lowered_key = key.lower()
     if _is_sensitive_key(lowered_key):
@@ -72,12 +104,12 @@ def _sanitize_value(
     if _looks_like_path_key(lowered_key):
         return _sanitize_path_value(value, workspace)
     if isinstance(value, str):
-        return _truncate(value)
+        return _truncate(_redact_sensitive_text(value), debug=debug)
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     if isinstance(value, Path):
         return _sanitize_path(value, workspace)
-    if depth >= MAX_DEPTH:
+    if depth >= (6 if debug else MAX_DEPTH):
         return "[max_depth]"
     if isinstance(value, Mapping):
         return {
@@ -86,9 +118,11 @@ def _sanitize_value(
                 child_value,
                 workspace=workspace,
                 depth=depth + 1,
+                debug=debug,
+                key_limit=key_limit,
             )
             for index, (child_key, child_value) in enumerate(value.items())
-            if index < MAX_KEYS
+            if index < key_limit
         }
     if isinstance(value, (list, tuple)):
         return [
@@ -97,6 +131,8 @@ def _sanitize_value(
                 item,
                 workspace=workspace,
                 depth=depth + 1,
+                debug=debug,
+                key_limit=key_limit,
             )
             for item in list(value)[:MAX_KEYS]
         ]
@@ -104,7 +140,11 @@ def _sanitize_value(
 
 
 def _is_sensitive_key(lowered_key: str) -> bool:
-    if lowered_key in SAFE_COUNTER_KEYS:
+    if (
+        lowered_key in SAFE_COUNTER_KEYS
+        or lowered_key in SAFE_DEBUG_TEXT_KEYS
+        or lowered_key in SAFE_HASH_KEYS
+    ):
         return False
     return any(part in lowered_key for part in SENSITIVE_KEY_PARTS)
 
@@ -135,7 +175,17 @@ def _sanitize_path(path: Path, workspace: Path | None) -> str:
     return f"[external_path]{suffix}" if suffix else "[external_path]"
 
 
-def _truncate(value: str) -> str:
-    if len(value) <= MAX_STRING_CHARS:
+def _truncate(value: str, *, debug: bool = False) -> str:
+    if debug or len(value) <= MAX_STRING_CHARS:
         return value
     return f"{value[:MAX_STRING_CHARS]}..."
+
+
+def _redact_sensitive_text(value: str) -> str:
+    redacted = value
+    for pattern in _SENSITIVE_TEXT_PATTERNS:
+        if pattern.groups == 2:
+            redacted = pattern.sub(lambda match: f"{match.group(1)}=[redacted]", redacted)
+        else:
+            redacted = pattern.sub("Bearer [redacted]", redacted)
+    return redacted

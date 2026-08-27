@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any, Union
 from prompt_toolkit.application import run_in_terminal
 
 from ui.cli.terminal.static_output import (
+    print_activity_group,
     print_assistant_markdown,
     print_static,
     print_tool_result,
@@ -81,6 +82,10 @@ class _PendingCommit:
     @property
     def is_tool_result(self) -> bool:
         return self.commit.is_tool_result
+
+    @property
+    def is_activity_group(self) -> bool:
+        return self.commit.is_activity_group
 
     @property
     def payload(self) -> Any:
@@ -260,6 +265,8 @@ class TerminalOutputCoordinator:
                     call_id=call_id,
                     workspace=pending.workspace,
                 )
+            elif commit.is_activity_group:
+                print_activity_group(commit.payload)
         for line in status_lines:
             print_static(line.text)
 

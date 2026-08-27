@@ -1,4 +1,4 @@
-"""Wrap discovered MCP tools as OneCode ToolDescriptors."""
+"""Wrap discovered MCP tools as Nervure ToolDescriptors."""
 
 from __future__ import annotations
 

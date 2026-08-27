@@ -16,11 +16,11 @@ def render_skills(runtime: CliRuntime) -> Group:
     if provider is None:
         return titled_section(
             "Skills",
-            Text(f"{SYMBOLS.info} Skills: disabled", style="onecode.subtle"),
-            style="onecode.info",
+            Text(f"{SYMBOLS.info} Skills: disabled", style="nervure.subtle"),
+            style="nervure.info",
         )
     skills = tuple(provider.visible_skills(runtime.state, runtime.workspace))
-    table = Table(box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("name")
     table.add_column("source")
     table.add_column("context")
@@ -41,4 +41,4 @@ def render_skills(runtime: CliRuntime) -> Group:
             preview(paths) if paths else "none",
             ", ".join(skill.allowed_tools) if skill.allowed_tools else "none",
         )
-    return titled_section("Skills", table, style="onecode.info")
+    return titled_section("Skills", table, style="nervure.info")

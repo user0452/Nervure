@@ -1,18 +1,10 @@
 """Inline terminal REPL for the TTY CLI path.
 
-This package implements the "Static + dynamic" rendering model used by
-Claude Code / Ink:
-
-- **Static region**: committed conversation, tool banners, errors and
-  assistant Markdown are printed once with :class:`rich.console.Console`
-  bound to ``sys.stdout`` and *without* a background style, so the
-  terminal host provides the background and the output remains in the
-  terminal scrollback after the application exits.
-
-- **Dynamic region**: a non-full-screen :class:`prompt_toolkit.Application`
-  with ``erase_when_done=True`` owns the bottom input prompt, completion
-  menu and live streaming preview. The application erases its own
-  region when it returns, leaving scrollback untouched.
+The interactive path uses :class:`persistent_app.PersistentTerminalApp` as
+one long-lived prompt_toolkit render owner. Its transcript, Activity rows,
+assistant streaming text, HITL overlay and input Buffer share one render tree;
+agent events update state instead of writing directly to stdout. Batch and
+legacy compatibility helpers retain their own plain/static output paths.
 
 - **Alternate screen**: full-screen temporary surfaces (``/status``,
   ``/resume`` selector, permission prompts, MCP trust, ``/connect``

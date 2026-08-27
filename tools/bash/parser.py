@@ -1,6 +1,6 @@
 """Tree-sitter backed Bash parser.
 
-The parser deliberately exposes only OneCode dataclasses. Raw tree-sitter
+The parser deliberately exposes only Nervure dataclasses. Raw tree-sitter
 nodes stay private so downstream code cannot start depending on grammar
 internals or accidentally bypass the fail-closed walker.
 """

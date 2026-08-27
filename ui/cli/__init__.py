@@ -1,1 +1,1 @@
-"""Standard-library CLI for OneCode."""
+"""Standard-library CLI for Nervure."""

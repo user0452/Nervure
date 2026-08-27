@@ -1,0 +1,1629 @@
+{
+  "case_ids": [
+    "xiangqi_flying_general",
+    "xiangqi_cannon_capture",
+    "xiangqi_movegen_perf",
+    "vcs_rename_status",
+    "vcs_staging_snapshot",
+    "vcs_diff_perf",
+    "route_astar_optimality",
+    "route_cache_invalidation",
+    "route_batch_perf",
+    "taskflow_cycle_detection",
+    "taskflow_retry_state",
+    "taskflow_scheduler_perf"
+  ],
+  "created_at": "2026-08-17T22:58:04.903059+00:00",
+  "dataset": {
+    "name": "nervure-medium-coding",
+    "version": "0.1.0"
+  },
+  "label": "Nervure V0 baseline",
+  "models": [
+    "mimo-v2.5-pro-1m"
+  ],
+  "providers": [
+    "custom"
+  ],
+  "repository": {
+    "branch": "main",
+    "dirty": true,
+    "repository_root": "C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure",
+    "revision": "f0e9cec8ae103049efdb57ca082960f242d58c1f"
+  },
+  "schema_version": 1,
+  "summary": {
+    "atif_all_valid": false,
+    "changed_files": 10,
+    "full_compact_count": 0,
+    "git_diff_bytes": 7632,
+    "infrastructure_errors": 0,
+    "ltm_extraction": {
+      "jobs": 0,
+      "model_calls": 0
+    },
+    "main": {
+      "avg_duration_ms_per_task": 400314.11150000006,
+      "avg_model_calls_per_task": 21.25,
+      "cache_hit_ratio": 0.6068767366224793,
+      "cache_read_input_tokens": 1578240,
+      "duration_ms": 4803769.338,
+      "input_tokens": 2600594,
+      "model_calls": 255,
+      "output_tokens": 162952,
+      "reasoning_tokens": 0,
+      "uncached_input_tokens": 1022354
+    },
+    "memory": {
+      "selector_cache_hits": 190,
+      "selector_fresh_calls": 0,
+      "selector_input_tokens": 0,
+      "selector_output_tokens": 0,
+      "selector_parse_failures": 0,
+      "selector_reasoning_tokens": 0
+    },
+    "passed": 9,
+    "subagent_child_count": 0,
+    "success_rate": 0.75,
+    "tools": {
+      "permission_denied": 12,
+      "tool_calls": 534,
+      "tool_errors": 57,
+      "unknown_tool": 0
+    },
+    "total": 12
+  },
+  "trials": [
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "xiangqi_flying_general",
+      "changed_files": [
+        "xiangqi/rules.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 469,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_flying_general",
+      "job_finished_at": "2026-08-17T13:41:11.114474",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 2.317,
+          "context_prepare_count": 19,
+          "context_prepare_max_ms": 6.919,
+          "context_prepare_total_ms": 44.03,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 108928,
+          "duration_ms": 140830.328,
+          "input_tokens": 176224,
+          "model_calls": 19,
+          "output_tokens": 4615,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 67296,
+          "visible_output_tokens": 4615
+        },
+        "memory": {
+          "selector_cache_hits": 12,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 6,
+            "edit_file": 1,
+            "glob": 8,
+            "grep": 4,
+            "read_file": 19
+          },
+          "file_not_read": 0,
+          "permission_denied": 2,
+          "repeated_identical_calls": {
+            "274beaf89b0f811e": 2,
+            "2e1e0a2ed662a3b9": 3,
+            "5adfdb07e400b75c": 2,
+            "757474d50f57de52": 2,
+            "84f24f0027311cde": 3,
+            "cb1858fb61a22aaf": 3,
+            "f1f71754d686be40": 2
+          },
+          "tool_calls": 39,
+          "tool_errors": 7,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 491
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_flying_general\\xiangqi_flying_general__xTzSuUa",
+      "trial_name": "xiangqi_flying_general__xTzSuUa"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "xiangqi_cannon_capture",
+      "changed_files": [
+        "xiangqi/pieces.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 509,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_cannon_capture-retry2",
+      "job_finished_at": "2026-08-17T14:13:55.244466",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 3.762,
+          "context_prepare_count": 13,
+          "context_prepare_max_ms": 8.389,
+          "context_prepare_total_ms": 48.906,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 98816,
+          "duration_ms": 112499.582,
+          "input_tokens": 144288,
+          "model_calls": 13,
+          "output_tokens": 3315,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 45472,
+          "visible_output_tokens": 3315
+        },
+        "memory": {
+          "selector_cache_hits": 12,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 0,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "bash": 3,
+            "edit_file": 1,
+            "glob": 6,
+            "grep": 2,
+            "read_file": 7,
+            "task_create": 1,
+            "task_list": 1,
+            "task_update": 2
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "5adfdb07e400b75c": 2
+          },
+          "tool_calls": 23,
+          "tool_errors": 3,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 383
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_cannon_capture-retry2\\xiangqi_cannon_capture__QVqW34r",
+      "trial_name": "xiangqi_cannon_capture__QVqW34r"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "xiangqi_movegen_perf",
+      "changed_files": [],
+      "exception": null,
+      "git_diff_bytes": 0,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_movegen_perf",
+      "job_finished_at": "2026-08-17T14:25:18.390594",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 2.507,
+          "context_prepare_count": 23,
+          "context_prepare_max_ms": 4.015,
+          "context_prepare_total_ms": 57.663,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 110784,
+          "duration_ms": 598086.2880000001,
+          "input_tokens": 209984,
+          "model_calls": 23,
+          "output_tokens": 24266,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 99200,
+          "visible_output_tokens": 24266
+        },
+        "memory": {
+          "selector_cache_hits": 16,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 3,
+            "edit_file": 3,
+            "enter_plan_mode": 1,
+            "exit_plan_mode": 3,
+            "glob": 6,
+            "grep": 1,
+            "read_file": 30,
+            "write_file": 1
+          },
+          "file_not_read": 0,
+          "permission_denied": 4,
+          "repeated_identical_calls": {
+            "274beaf89b0f811e": 2,
+            "2e1e0a2ed662a3b9": 2,
+            "5adfdb07e400b75c": 3,
+            "757474d50f57de52": 2,
+            "7d2413fb357af656": 3,
+            "84f24f0027311cde": 3,
+            "b29cd73867305b7e": 3,
+            "ba319610cd72af83": 5
+          },
+          "tool_calls": 49,
+          "tool_errors": 6,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 585
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 0.0,
+      "status": "agent_failure",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-xiangqi_movegen_perf\\xiangqi_movegen_perf__PGjYRAG",
+      "trial_name": "xiangqi_movegen_perf__PGjYRAG"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "vcs_rename_status",
+      "changed_files": [
+        "minivcs/repository.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 1205,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_rename_status",
+      "job_finished_at": "2026-08-17T14:31:26.385417",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 3.122,
+          "context_prepare_count": 27,
+          "context_prepare_max_ms": 10.256,
+          "context_prepare_total_ms": 84.28399999999999,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 174784,
+          "duration_ms": 294498.241,
+          "input_tokens": 273906,
+          "model_calls": 27,
+          "output_tokens": 7467,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 99122,
+          "visible_output_tokens": 7467
+        },
+        "memory": {
+          "selector_cache_hits": 20,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 10,
+            "edit_file": 1,
+            "glob": 4,
+            "grep": 6,
+            "read_file": 33
+          },
+          "file_not_read": 0,
+          "permission_denied": 2,
+          "repeated_identical_calls": {
+            "037cf2149a1b86d3": 2,
+            "03eafae7b7753bde": 3,
+            "274beaf89b0f811e": 3,
+            "29826bdc94b24321": 3,
+            "3ee2b4c491011833": 2,
+            "69b63534edc7c637": 2,
+            "7d2cd2b4776a2c1f": 2,
+            "9b78158a6a2fc7b6": 2,
+            "9e16e00b1911d8ee": 3,
+            "bb70d78a5f9cb0e9": 3
+          },
+          "tool_calls": 55,
+          "tool_errors": 10,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 707
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_rename_status\\vcs_rename_status__NrtcmkV",
+      "trial_name": "vcs_rename_status__NrtcmkV"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "vcs_staging_snapshot",
+      "changed_files": [
+        "minivcs/repository.py",
+        "tests/test_basic.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 1740,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_staging_snapshot",
+      "job_finished_at": "2026-08-17T14:36:09.051391",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 2.91,
+          "context_prepare_count": 20,
+          "context_prepare_max_ms": 9.379,
+          "context_prepare_total_ms": 58.208999999999996,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 111936,
+          "duration_ms": 208333.265,
+          "input_tokens": 188944,
+          "model_calls": 20,
+          "output_tokens": 6065,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 77008,
+          "visible_output_tokens": 6065
+        },
+        "memory": {
+          "selector_cache_hits": 14,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 4,
+            "edit_file": 3,
+            "glob": 3,
+            "grep": 1,
+            "read_file": 26
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "1bf4fb6fb00a2d75": 2,
+            "274beaf89b0f811e": 3,
+            "29826bdc94b24321": 3,
+            "523b4fa251b37a87": 2,
+            "70ac1df115abf460": 2,
+            "9e16e00b1911d8ee": 3,
+            "b987debff3b54f6e": 2,
+            "f9f7d532f2976e5c": 3
+          },
+          "tool_calls": 38,
+          "tool_errors": 3,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 517
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_staging_snapshot\\vcs_staging_snapshot__wtX9DuZ",
+      "trial_name": "vcs_staging_snapshot__wtX9DuZ"
+    },
+    {
+      "artifacts_complete": false,
+      "atif_errors": [],
+      "atif_valid": null,
+      "case_id": "vcs_diff_perf",
+      "changed_files": [],
+      "exception": {
+        "exception_message": "Agent execution timed out after 900.0 seconds",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 175, in wrapper\n    return await fn(self, instruction, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\evals\\agent.py\", line 98, in run\n    await self.exec_as_agent(\n    ...<5 lines>...\n    )\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 884, in exec_as_agent\n    return await self._exec(\n           ^^^^^^^^^^^^^^^^^\n        environment, command, env=env, cwd=cwd, timeout_sec=timeout_sec\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 835, in _exec\n    result = await environment.exec(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1096, in exec\n    return await self._compose_exec(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1173, in _compose_exec\n    return await self._run_docker_compose_command(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<4 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 649, in _run_docker_compose_command\n    result = await self._collect_buffered_output(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 675, in _collect_buffered_output\n    stdout_bytes, stderr_bytes = await asyncio.wait_for(\n                                 ^^^^^^^^^^^^^^^^^^^^^^^\n        process.communicate(input=stdin_data), timeout=timeout_sec\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\subprocess.py\", line 201, in communicate\n    stdin, stdout, stderr = await tasks.gather(stdin, stdout, stderr)\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\subprocess.py\", line 181, in _read_stream\n    output = await stream.read()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 723, in read\n    block = await self.read(self._limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 730, in read\n    await self._wait_for_data('read')\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 539, in _wait_for_data\n    await self._waiter\nasyncio.exceptions.CancelledError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 480, in _run_agent_phase\n    await asyncio.wait_for(\n    ...<6 lines>...\n    )\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 506, in wait_for\n    async with timeouts.timeout(timeout):\n               ~~~~~~~~~~~~~~~~^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\timeouts.py\", line 116, in __aexit__\n    raise TimeoutError from exc_val\nTimeoutError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\single_step.py\", line 77, in _run_agent\n    await self._run_agent_phase(\n    ...<5 lines>...\n    )\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 489, in _run_agent_phase\n    raise AgentTimeoutError(\n        f\"Agent execution timed out after {timeout_sec} seconds\"\n    ) from exc\nharbor.trial.errors.AgentTimeoutError: Agent execution timed out after 900.0 seconds\n",
+        "exception_type": "AgentTimeoutError",
+        "occurred_at": "2026-08-17T06:52:21.236547Z"
+      },
+      "git_diff_bytes": 0,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_diff_perf",
+      "job_finished_at": "2026-08-17T14:52:42.524013",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 4.182,
+          "context_prepare_count": 31,
+          "context_prepare_max_ms": 10.419,
+          "context_prepare_total_ms": 129.649,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 180032,
+          "duration_ms": 899488.23,
+          "input_tokens": 289144,
+          "model_calls": 31,
+          "output_tokens": 32151,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 109112,
+          "visible_output_tokens": 32151
+        },
+        "memory": {
+          "selector_cache_hits": 24,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 3,
+            "edit_file": 1,
+            "enter_plan_mode": 1,
+            "exit_plan_mode": 4,
+            "glob": 7,
+            "grep": 2,
+            "read_file": 51,
+            "write_file": 1
+          },
+          "file_not_read": 0,
+          "permission_denied": 3,
+          "repeated_identical_calls": {
+            "03eafae7b7753bde": 4,
+            "1bf4fb6fb00a2d75": 3,
+            "274beaf89b0f811e": 3,
+            "29826bdc94b24321": 5,
+            "3ee2b4c491011833": 4,
+            "57994970a9fc5ab3": 2,
+            "74153d22117487dc": 2,
+            "950acf0b86101f01": 4,
+            "9e16e00b1911d8ee": 4,
+            "bb70d78a5f9cb0e9": 4,
+            "bd93ccfbf77412fb": 3,
+            "d48eb69c2fd48599": 2,
+            "f9f7d532f2976e5c": 2
+          },
+          "tool_calls": 71,
+          "tool_errors": 9,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 893
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 0.0,
+      "status": "agent_failure",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-vcs_diff_perf\\vcs_diff_perf__ZXkmRyH",
+      "trial_name": "vcs_diff_perf__ZXkmRyH"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "route_astar_optimality",
+      "changed_files": [
+        "route_lab/astar.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 1103,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-route_astar_optimality",
+      "job_finished_at": "2026-08-17T15:04:41.079542",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 3.557,
+          "context_prepare_count": 25,
+          "context_prepare_max_ms": 9.992,
+          "context_prepare_total_ms": 88.929,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 161408,
+          "duration_ms": 645026.741,
+          "input_tokens": 319099,
+          "model_calls": 25,
+          "output_tokens": 20256,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 157691,
+          "visible_output_tokens": 20256
+        },
+        "memory": {
+          "selector_cache_hits": 19,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 10,
+            "edit_file": 1,
+            "glob": 6,
+            "grep": 1,
+            "memory_bank_portal": 1,
+            "read_file": 32
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "166b08158aa50739": 2,
+            "274beaf89b0f811e": 2,
+            "70e827670307ca51": 2,
+            "86802608d3541546": 2,
+            "9a96c922f3299fec": 2,
+            "d5a5f8c70bf92fab": 3,
+            "f7809a3126c328ea": 4,
+            "f8cc8545c487b9d9": 2
+          },
+          "tool_calls": 52,
+          "tool_errors": 6,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 694
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-route_astar_optimality\\route_astar_optimality__MwkefuA",
+      "trial_name": "route_astar_optimality__MwkefuA"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "route_cache_invalidation",
+      "changed_files": [
+        "route_lab/graph.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 453,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-route_cache_invalidation-parallel",
+      "job_finished_at": "2026-08-17T15:05:11.882841",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 2.925,
+          "context_prepare_count": 26,
+          "context_prepare_max_ms": 7.739,
+          "context_prepare_total_ms": 76.042,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 178880,
+          "duration_ms": 337813.158,
+          "input_tokens": 268841,
+          "model_calls": 26,
+          "output_tokens": 7993,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 89961,
+          "visible_output_tokens": 7993
+        },
+        "memory": {
+          "selector_cache_hits": 19,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 14,
+            "edit_file": 1,
+            "glob": 3,
+            "grep": 1,
+            "read_file": 27
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "274beaf89b0f811e": 2,
+            "6c76681e5b6ea284": 4,
+            "73a86ce5a345ce2c": 2,
+            "86802608d3541546": 4,
+            "9a96c922f3299fec": 4
+          },
+          "tool_calls": 47,
+          "tool_errors": 7,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 672
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-route_cache_invalidation-parallel\\route_cache_invalidation__qGqkV4G",
+      "trial_name": "route_cache_invalidation__qGqkV4G"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "route_batch_perf",
+      "changed_files": [
+        "route_lab/batch.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 691,
+      "job_dir": "C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\jobs\\nervure-route_batch_perf-rerun2",
+      "job_finished_at": "2026-08-18T06:56:44.749750",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 2.64,
+          "context_prepare_count": 19,
+          "context_prepare_max_ms": 8.306,
+          "context_prepare_total_ms": 50.150999999999996,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 112384,
+          "duration_ms": 224483.17,
+          "input_tokens": 179479,
+          "model_calls": 19,
+          "output_tokens": 10740,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 67095,
+          "visible_output_tokens": 10740
+        },
+        "memory": {
+          "selector_cache_hits": 11,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 8,
+            "edit_file": 1,
+            "glob": 8,
+            "read_file": 34
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "04fe9ce995161677": 4,
+            "166b08158aa50739": 3,
+            "274beaf89b0f811e": 3,
+            "6c76681e5b6ea284": 3,
+            "70e827670307ca51": 3,
+            "86802608d3541546": 3
+          },
+          "tool_calls": 52,
+          "tool_errors": 1,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 562
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\jobs\\nervure-route_batch_perf-rerun2\\route_batch_perf__AYwoEhG",
+      "trial_name": "route_batch_perf__AYwoEhG"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "taskflow_cycle_detection",
+      "changed_files": [
+        "taskflow/graph.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 677,
+      "job_dir": "C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\jobs\\nervure-taskflow_cycle_detection",
+      "job_finished_at": "2026-08-18T06:40:24.126744",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 1.724,
+          "context_prepare_count": 14,
+          "context_prepare_max_ms": 3.217,
+          "context_prepare_total_ms": 24.131,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 75648,
+          "duration_ms": 151444.256,
+          "input_tokens": 134361,
+          "model_calls": 14,
+          "output_tokens": 6552,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 58713,
+          "visible_output_tokens": 6552
+        },
+        "memory": {
+          "selector_cache_hits": 7,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 2,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "agent": 1,
+            "bash": 7,
+            "edit_file": 1,
+            "read_file": 23
+          },
+          "file_not_read": 0,
+          "permission_denied": 1,
+          "repeated_identical_calls": {
+            "274beaf89b0f811e": 2,
+            "8602cb6f3632e774": 3
+          },
+          "tool_calls": 32,
+          "tool_errors": 2,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 351
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\jobs\\nervure-taskflow_cycle_detection\\taskflow_cycle_detection__BCSkQa7",
+      "trial_name": "taskflow_cycle_detection__BCSkQa7"
+    },
+    {
+      "artifacts_complete": true,
+      "atif_errors": [],
+      "atif_valid": true,
+      "case_id": "taskflow_retry_state",
+      "changed_files": [
+        "taskflow/scheduler.py"
+      ],
+      "exception": null,
+      "git_diff_bytes": 785,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-taskflow_retry_state-parallel",
+      "job_finished_at": "2026-08-17T15:18:55.809794",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 3.613,
+          "context_prepare_count": 19,
+          "context_prepare_max_ms": 9.015,
+          "context_prepare_total_ms": 68.641,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 129792,
+          "duration_ms": 291652.232,
+          "input_tokens": 212041,
+          "model_calls": 19,
+          "output_tokens": 10166,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 82249,
+          "visible_output_tokens": 10166
+        },
+        "memory": {
+          "selector_cache_hits": 18,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 0,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "bash": 6,
+            "edit_file": 1,
+            "glob": 3,
+            "read_file": 10,
+            "task_create": 1,
+            "task_update": 2
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "2f72c8928fd6e3c0": 2,
+            "b753da00464b2a36": 2
+          },
+          "tool_calls": 23,
+          "tool_errors": 2,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 475
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 1.0,
+      "status": "pass",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-taskflow_retry_state-parallel\\taskflow_retry_state__JCaLaQ6",
+      "trial_name": "taskflow_retry_state__JCaLaQ6"
+    },
+    {
+      "artifacts_complete": false,
+      "atif_errors": [],
+      "atif_valid": null,
+      "case_id": "taskflow_scheduler_perf",
+      "changed_files": [],
+      "exception": {
+        "exception_message": "Agent execution timed out after 900.0 seconds",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 175, in wrapper\n    return await fn(self, instruction, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\刘\\Documents\\Codex\\2026-08-16\\nervure\\evals\\agent.py\", line 98, in run\n    await self.exec_as_agent(\n    ...<5 lines>...\n    )\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 884, in exec_as_agent\n    return await self._exec(\n           ^^^^^^^^^^^^^^^^^\n        environment, command, env=env, cwd=cwd, timeout_sec=timeout_sec\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 835, in _exec\n    result = await environment.exec(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1096, in exec\n    return await self._compose_exec(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<6 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1173, in _compose_exec\n    return await self._run_docker_compose_command(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<4 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 649, in _run_docker_compose_command\n    result = await self._collect_buffered_output(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<3 lines>...\n    )\n    ^\n  File \"D:\\python\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 675, in _collect_buffered_output\n    stdout_bytes, stderr_bytes = await asyncio.wait_for(\n                                 ^^^^^^^^^^^^^^^^^^^^^^^\n        process.communicate(input=stdin_data), timeout=timeout_sec\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 507, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\subprocess.py\", line 201, in communicate\n    stdin, stdout, stderr = await tasks.gather(stdin, stdout, stderr)\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\subprocess.py\", line 181, in _read_stream\n    output = await stream.read()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 723, in read\n    block = await self.read(self._limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 730, in read\n    await self._wait_for_data('read')\n  File \"D:\\python\\Lib\\asyncio\\streams.py\", line 539, in _wait_for_data\n    await self._waiter\nasyncio.exceptions.CancelledError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 480, in _run_agent_phase\n    await asyncio.wait_for(\n    ...<6 lines>...\n    )\n  File \"D:\\python\\Lib\\asyncio\\tasks.py\", line 506, in wait_for\n    async with timeouts.timeout(timeout):\n               ~~~~~~~~~~~~~~~~^^^^^^^^^\n  File \"D:\\python\\Lib\\asyncio\\timeouts.py\", line 116, in __aexit__\n    raise TimeoutError from exc_val\nTimeoutError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\single_step.py\", line 77, in _run_agent\n    await self._run_agent_phase(\n    ...<5 lines>...\n    )\n  File \"D:\\python\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 489, in _run_agent_phase\n    raise AgentTimeoutError(\n        f\"Agent execution timed out after {timeout_sec} seconds\"\n    ) from exc\nharbor.trial.errors.AgentTimeoutError: Agent execution timed out after 900.0 seconds\n",
+        "exception_type": "AgentTimeoutError",
+        "occurred_at": "2026-08-17T07:28:27.175065Z"
+      },
+      "git_diff_bytes": 0,
+      "job_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-taskflow_scheduler_perf-parallel",
+      "job_finished_at": "2026-08-17T15:28:48.577641",
+      "metrics": {
+        "compact": {
+          "compact_cache_read": 0,
+          "compact_duration_ms": 0.0,
+          "compact_failure": 0,
+          "compact_input": 0,
+          "compact_output": 0,
+          "compact_requests": 0,
+          "compact_trigger": [
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro",
+            "micro"
+          ],
+          "compact_uncached": 0,
+          "full_compact_count": 0
+        },
+        "context": {
+          "compact_boundary": null,
+          "context_prepare_avg_ms": 4.485,
+          "context_prepare_count": 19,
+          "context_prepare_max_ms": 8.47,
+          "context_prepare_total_ms": 85.218,
+          "selected_memories": []
+        },
+        "hitl": {
+          "ask_user_question_count": 0,
+          "hitl_possible_auto_continue": false,
+          "hitl_tool_results_without_new_user_turn": 0
+        },
+        "ltm_extraction": {
+          "events": 0,
+          "jobs": 0,
+          "model_calls": 0
+        },
+        "main_agent": {
+          "cache_read_input_tokens": 134848,
+          "duration_ms": 899613.8470000001,
+          "input_tokens": 204283,
+          "model_calls": 19,
+          "output_tokens": 29366,
+          "reasoning_tokens": 0,
+          "uncached_input_tokens": 69435,
+          "visible_output_tokens": 29366
+        },
+        "memory": {
+          "selector_cache_hits": 18,
+          "selector_duration_ms": 0,
+          "selector_fresh_calls": 0,
+          "selector_input_tokens": 0,
+          "selector_output_tokens": 0,
+          "selector_parse_failures": 0,
+          "selector_reasoning_tokens": 0,
+          "selector_selected_paths": []
+        },
+        "schema_version": 1,
+        "session_memory": {
+          "event_count": 0,
+          "regression": false
+        },
+        "subagent": {
+          "child_count": 0,
+          "errors": 0,
+          "events": 0,
+          "unknown_tool": 0
+        },
+        "tools": {
+          "ask_user_question": 0,
+          "breakdown": {
+            "glob": 4,
+            "read_file": 46,
+            "task_create": 2,
+            "task_update": 1
+          },
+          "file_not_read": 0,
+          "permission_denied": 0,
+          "repeated_identical_calls": {
+            "1d7fac5b68b23dec": 2,
+            "274beaf89b0f811e": 5,
+            "2f72c8928fd6e3c0": 5,
+            "314d00579873ad15": 5,
+            "3e29ae1933b76a3b": 5,
+            "8602cb6f3632e774": 5,
+            "8a2043322a97c8e2": 5,
+            "8e3ce8762728cd9c": 4,
+            "b753da00464b2a36": 5,
+            "eff0a42f6f45cda1": 5
+          },
+          "tool_calls": 53,
+          "tool_errors": 1,
+          "unknown_tool": 0
+        },
+        "trace": {
+          "malformed_lines": 0,
+          "records": 723
+        }
+      },
+      "model": "mimo-v2.5-pro-1m",
+      "provider": "custom",
+      "reward": 0.0,
+      "status": "agent_failure",
+      "suite": "full",
+      "trial_dir": "G:\\DockerData\\harbor-jobs\\nervure-v0-full-taskflow_scheduler_perf-parallel\\taskflow_scheduler_perf__wzoYa2Z",
+      "trial_name": "taskflow_scheduler_perf__wzoYa2Z"
+    }
+  ]
+}

@@ -90,7 +90,7 @@ class McpTrustPolicy:
 
 
 class McpTrustStore:
-    """Stores local MCP trust decisions in .onecode/settings.json."""
+    """Stores local MCP trust decisions in .nervure/settings.json (legacy .onecode compatible)."""
 
     def __init__(self, settings_path: Path) -> None:
         self.settings_path = settings_path

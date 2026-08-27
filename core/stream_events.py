@@ -32,6 +32,7 @@ AgentEventType = Literal[
     "tool_progress",
     "tool_result",
     "transition",
+    "suspended",
     "completed",
     "error",
 ]

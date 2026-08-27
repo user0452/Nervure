@@ -10,7 +10,9 @@ from services.memory.types import MemoryPaths
 
 def memory_paths(workspace: Path | str) -> MemoryPaths:
     workspace_path = resolve_path(Path(workspace))
-    memory_dir = workspace_path / ".onecode" / "memory"
+    primary = workspace_path / ".nervure" / "memory"
+    legacy = workspace_path / ".onecode" / "memory"
+    memory_dir = primary if primary.exists() or not legacy.exists() else legacy
     return MemoryPaths(
         workspace=workspace_path,
         memory_dir=memory_dir,
@@ -20,12 +22,17 @@ def memory_paths(workspace: Path | str) -> MemoryPaths:
 
 def is_auto_memory_path(path: Path | str, workspace: Path | str) -> bool:
     target = resolve_path(Path(path))
-    memory_dir = memory_paths(workspace).memory_dir
-    try:
-        target.relative_to(memory_dir)
-    except ValueError:
-        return False
-    return True
+    workspace_path = resolve_path(Path(workspace))
+    for memory_dir in (
+        workspace_path / ".nervure" / "memory",
+        workspace_path / ".onecode" / "memory",
+    ):
+        try:
+            target.relative_to(memory_dir)
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def is_auto_memory_markdown_path(path: Path | str, workspace: Path | str) -> bool:

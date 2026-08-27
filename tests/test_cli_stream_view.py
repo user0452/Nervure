@@ -242,7 +242,7 @@ def test_status_shows_thinking_while_awaiting_first_event() -> None:
     fragments = render_status_fragments(state)
     text = "".join(fragment for _, fragment in fragments)
     assert "thinking" in text
-    assert "onecode> " in text
+    assert "Nervure> " in text
 
 
 def test_status_shows_tool_label_when_tool_running() -> None:

@@ -13,7 +13,7 @@ We follow three escalating probes:
    16-color ANSI palette to dark vs light backgrounds.
 
 3. **Hard-coded dark fallback** — when nothing else is available we
-   assume dark, which matches the historical OneCode default.
+   assume dark, which matches the historical Nervure default.
 
 Rich itself never sets a background style, so the terminal host always
 wins. The brightness only governs which foreground accent we pick for

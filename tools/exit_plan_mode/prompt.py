@@ -2,7 +2,7 @@
 
 PROMPT = """\
 Use this tool when you are in plan mode and have finished writing the plan to
-``.onecode/plans/<slug>.md``. Calling it asks the user to approve the plan
+``.nervure/plans/<slug>.md``. Calling it asks the user to approve the plan
 and, on approval, returns the runtime to its pre-plan permission mode so
 implementation can begin.
 

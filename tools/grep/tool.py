@@ -34,7 +34,26 @@ from utils.text_io import decode_text
 
 
 DEFAULT_HEAD_LIMIT = 250
-VCS_EXCLUDES = (".git", ".svn", ".hg", ".bzr", ".jj", ".sl")
+DEFAULT_EXCLUDES = (
+    ".git",
+    ".svn",
+    ".hg",
+    ".bzr",
+    ".jj",
+    ".sl",
+    ".nervure",
+    ".onecode",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "node_modules",
+    "build",
+    "dist",
+    ".cache",
+)
 
 
 @dataclass(frozen=True)
@@ -202,7 +221,14 @@ def _handle_with_runner(
 
     cwd = target if target.is_dir() else target.parent
     search_target = "." if target.is_dir() else target.name
-    args = _build_rg_args(parsed, search_target)
+    # ripgrep's default exclusions apply to every directory below the
+    # selected root.  When the caller explicitly selects an excluded
+    # directory (or a file below one), that selected path must remain
+    # inspectable; only its nested excluded directories stay filtered.
+    explicit_excluded_dirs = {
+        part for part in target.parts if part in DEFAULT_EXCLUDES
+    } if parsed.path is not None else set()
+    args = _build_rg_args(parsed, search_target, explicit_excluded_dirs)
 
     try:
         rg_result = runner.run(args, cwd)
@@ -229,7 +255,11 @@ def _handle_with_runner(
     return _content_result(rg_result.stdout, cwd, parsed, runtime, guard_cache)
 
 
-def _build_rg_args(parsed: GrepInput, search_target: str) -> list[str]:
+def _build_rg_args(
+    parsed: GrepInput,
+    search_target: str,
+    explicit_excluded_dirs: set[str] | frozenset[str] = frozenset(),
+) -> list[str]:
     args = [
         "--hidden",
         "--max-columns",
@@ -239,8 +269,13 @@ def _build_rg_args(parsed: GrepInput, search_target: str) -> list[str]:
         "--no-heading",
         "--with-filename",
     ]
-    for directory in VCS_EXCLUDES:
-        args.extend(["--glob", f"!{directory}/**"])
+    for directory in DEFAULT_EXCLUDES:
+        if directory in explicit_excluded_dirs:
+            continue
+        # A single-segment pattern only excludes a root-level directory in
+        # ripgrep.  The ``**/`` prefix is required for nested generated and
+        # VCS directories while keeping ordinary hidden/config files visible.
+        args.extend(["--glob", f"!**/{directory}/**"])
 
     if parsed.output_mode == "files_with_matches":
         args.append("-l")

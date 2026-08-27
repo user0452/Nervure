@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_messages_path, sessions_dir
+from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
 from services.context.message_store import MessageStore
 from services.tools.executor import ToolExecutionUpdate
 from services.tools.registry import ToolRegistry
@@ -78,12 +78,31 @@ def test_resume_suggestions_list_session_ids(tmp_path: Path) -> None:
     runtime = make_runtime(tmp_path)
     messages_path = session_messages_path(tmp_path, "session-old")
     messages_path.parent.mkdir(parents=True)
-    messages_path.write_text("", encoding="utf-8")
+    messages_path.write_text(
+        '{"type":"message","message":{"role":"user","content":"old"}}\n',
+        encoding="utf-8",
+    )
 
     items = suggestions_for(runtime, "/resume session", len("/resume session"))
 
     assert "session-old" in [item.replacement for item in items]
     assert {item.kind for item in items} == {"session"}
+
+
+def test_resume_suggestions_include_existing_legacy_sessions(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    legacy_messages_path = (
+        tmp_path / ".onecode" / "sessions" / "legacy-session" / "messages.jsonl"
+    )
+    legacy_messages_path.parent.mkdir(parents=True)
+    legacy_messages_path.write_text(
+        '{"type":"message","message":{"role":"user","content":"legacy"}}\n',
+        encoding="utf-8",
+    )
+
+    items = suggestions_for(runtime, "/resume legacy", len("/resume legacy"))
+
+    assert "legacy-session" in [item.replacement for item in items]
 
 
 def test_file_suggestions_are_bounded_to_workspace(tmp_path: Path) -> None:

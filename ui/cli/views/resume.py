@@ -17,7 +17,7 @@ def render_session_summaries(
     summaries: Iterable[SessionSummary],
     workspace: Path,
 ) -> Group:
-    table = Table(box=None, show_header=True, header_style="onecode.subtle")
+    table = Table(box=None, show_header=True, header_style="nervure.subtle")
     table.add_column("session")
     table.add_column("updated")
     table.add_column("messages", justify="right")
@@ -32,7 +32,7 @@ def render_session_summaries(
             str(summary.message_count),
             display_path(summary.messages_path, workspace),
         )
-    return titled_section("Resume", table, style="onecode.info")
+    return titled_section("Resume", table, style="nervure.info")
 
 
 def _format_updated_at(value: datetime | None) -> str:

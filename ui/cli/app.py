@@ -1,4 +1,4 @@
-"""OneCode CLI entry point."""
+"""Nervure CLI entry point."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ from core.context_engine import ContextEngine
 from core.loop import AgentLoop
 from core.runtime_state import RuntimeState
 from infrastructure.providers.factory import create_model_client
-from infrastructure.filesystem.onecode_paths import sessions_dir
+from infrastructure.config.env import load_trace_settings
+from infrastructure.filesystem.nervure_paths import existing_state_dir, sessions_dir
 from prompts.assembler import DynamicPromptAssembler
 from services.attachments import (
     AttachmentCollector,
@@ -29,9 +30,8 @@ from services.background_tasks import (
 )
 from services.compaction import (
     ContextCompactionService,
-    SessionMemoryExtractionService,
-    SessionMemoryStore,
 )
+from services.checkpoints import CheckpointStore
 from services.context.current_model_context import CurrentModelContext
 from services.context.message_store import MessageStore
 from services.guard import SandboxBoundary, SandboxGuard
@@ -77,12 +77,14 @@ from services.questions.types import (
     QuestionResponse,
     UserQuestionError,
 )
+from services.questions.prompter import UserQuestionPrompter
 from services.skills import LoaderSkillCatalogProvider
 from services.subagents.runner import SubagentRunner
 from services.tasks import TaskStore
 from services.tools.executor import RegistryToolExecutor
 from services.tools.file_state import FileStateCache
 from services.tools.registry import ToolRegistry
+from services.tools.discovery import ToolDiscovery, ToolMetadata
 from tools.agent import descriptor as agent_descriptor
 from tools.ask_user_question import descriptor as ask_user_question_descriptor
 from tools.bash import descriptor as bash_descriptor
@@ -93,6 +95,8 @@ from tools.exit_plan_mode import descriptor as exit_plan_mode_descriptor
 from tools.glob import descriptor as glob_descriptor
 from tools.grep import descriptor as grep_descriptor
 from tools.read_file import descriptor as read_file_descriptor
+from tools.repo_map import descriptor as repo_map_descriptor
+from tools.symbol_search import descriptor as symbol_search_descriptor
 from tools.skill import descriptor as skill_descriptor
 from tools.task_create import descriptor as task_create_descriptor
 from tools.task_get import descriptor as task_get_descriptor
@@ -102,12 +106,64 @@ from tools.write_file import descriptor as write_file_descriptor
 from ui.cli import renderer
 from ui.cli.input import ConfirmOption, read_confirm_sync
 from ui.cli.permissions import render_permission_request_summary
-from ui.cli.session_memory import BackgroundSessionMemoryExtractor
 from ui.cli.types import CliRuntime
 from utils.toolResultStorage import ToolResultStorage
 
 TrustChoice = Literal["trust", "skip"]
 McpTrustMode = Literal["prompt", "skip"]
+
+_REPO_UNDERSTANDING_DISABLE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_switch_disabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _REPO_UNDERSTANDING_DISABLE_VALUES
+
+
+def _subagent_disabled() -> bool:
+    """Return whether the provider-visible ``agent`` tool is disabled.
+
+    Both names are accepted so eval harnesses can use the explicit tool name
+    while existing Nervure-style configuration can use the broader
+    ``SUBAGENT`` switch.  The default remains enabled.  Registration is
+    skipped entirely rather than registering-then-denying, which keeps the
+    schema and dynamic prompt free of the tool in OFF trials.
+    """
+
+    return _env_switch_disabled("NERVURE_DISABLE_SUBAGENT") or _env_switch_disabled(
+        "NERVURE_DISABLE_AGENT_TOOL"
+    )
+
+
+def _subagent_descriptors(
+    runner: SubagentRunner,
+    background_task_manager: BackgroundTaskManager,
+) -> tuple:
+    """Return the provider-visible agent descriptor according to the switch."""
+
+    if _subagent_disabled():
+        return ()
+    return (agent_descriptor(runner, background_task_manager),)
+
+
+def _repo_map_descriptors() -> tuple:
+    """Return the provider-visible repo_map descriptor when the experiment enables it.
+
+    The ablation switch is intentionally scoped to registration.  This keeps the
+    tool out of both the provider schema and prompt sections when disabled, while
+    leaving the tool implementation, permissions, and every other builtin alone.
+    """
+
+    if _env_switch_disabled("NERVURE_DISABLE_REPO_MAP"):
+        return ()
+    return (repo_map_descriptor(),)
+
+
+def _symbol_search_descriptors() -> tuple:
+    """Return the provider-visible symbol_search descriptor for the factorial switch."""
+
+    if _env_switch_disabled("NERVURE_DISABLE_SYMBOL_SEARCH"):
+        return ()
+    return (symbol_search_descriptor(),)
 
 
 @dataclass(frozen=True)
@@ -186,9 +242,12 @@ def build_runtime(
     *,
     trust_prompt: Callable[[McpTrustPromptRequest], TrustChoice] | None = None,
     permission_prompter: PermissionPrompter | None = None,
+    user_question_prompter: UserQuestionPrompter | None = None,
     mcp_trust_mode: McpTrustMode = "prompt",
+    allow_provider_process_env: bool = False,
 ) -> CliRuntime:
     workspace = workspace.resolve()
+    provider_config_path = _provider_config_path(workspace)
     state = RuntimeState()
     state.metadata["workspace"] = str(workspace)
     message_store = MessageStore(
@@ -198,7 +257,7 @@ def build_runtime(
     )
     permission_store = SessionPermissionStore()
     project_permission_store = ProjectPermissionSettingsStore(
-        workspace / ".onecode" / "settings.json"
+        existing_state_dir(workspace) / "settings.json"
     )
     project_permission_store.load_rules()
     permission_policy = PermissionPolicy(
@@ -207,10 +266,16 @@ def build_runtime(
     )
     skill_provider = LoaderSkillCatalogProvider()
     trace_sink = JsonlTraceSink(sessions_dir(workspace), state.session_id)
+    trace_settings = load_trace_settings(
+        provider_config_path,
+        allow_process_env=allow_provider_process_env,
+    )
     trace_recorder = TraceRecorder(
         session_id=state.session_id,
         workspace=workspace,
         sink=trace_sink,
+        trace_level=trace_settings.trace_level,
+        max_tool_result_chars=trace_settings.max_tool_result_chars,
     )
     error_log_sink = JsonlErrorLogSink(sessions_dir(workspace), state.session_id)
     error_log_recorder = ErrorLogRecorder(
@@ -224,7 +289,7 @@ def build_runtime(
         error_log_recorder.record_error(exc, source="mcp_config")
         error_log_recorder.flush()
         raise
-    mcp_trust_store = McpTrustStore(workspace / ".onecode" / "settings.json")
+    mcp_trust_store = McpTrustStore(existing_state_dir(workspace) / "settings.json")
     if mcp_trust_mode == "prompt":
         _prompt_for_project_mcp_trust(
             workspace,
@@ -255,13 +320,15 @@ def build_runtime(
     )
     runner_ref: dict[str, SubagentRunner] = {}
     plan_store = PlanStore(workspace)
-    user_question_prompter = BatchUserQuestionPrompter()
+    user_question_prompter = user_question_prompter or BatchUserQuestionPrompter()
     base_descriptors = (
         read_file_descriptor(),
         edit_file_descriptor(),
         write_file_descriptor(),
         glob_descriptor(),
         grep_descriptor(),
+        *_repo_map_descriptors(),
+        *_symbol_search_descriptors(),
         bash_descriptor(background_task_manager),
         background_task_stop_descriptor(background_task_manager),
         skill_descriptor(
@@ -278,9 +345,19 @@ def build_runtime(
         ask_user_question_descriptor(user_question_prompter),
         *mcp_descriptors,
     )
-    registry = ToolRegistry(base_descriptors, permission_policy=permission_policy)
+    tool_discovery = ToolDiscovery(
+        (
+            ToolMetadata("read_file", "file safety", True),
+            ToolMetadata("glob", "file safety", True),
+            ToolMetadata("grep", "file safety", True),
+            ToolMetadata("bash", "shell"),
+            ToolMetadata("repo_map", "repository exploration"),
+            ToolMetadata("symbol_search", "repository exploration"),
+            ToolMetadata("skill", "capability"),
+        )
+    )
+    registry = ToolRegistry(base_descriptors, permission_policy=permission_policy, discovery=tool_discovery)
     result_store = ToolResultStorage(message_store.transcript_store.session_dir)
-    session_memory_store = SessionMemoryStore(message_store.transcript_store.session_dir)
     long_term_memory_store = LongTermMemoryStore(workspace)
     instruction_memory_loader = InstructionMemoryLoader(
         workspace,
@@ -296,7 +373,6 @@ def build_runtime(
     )
     compaction_service = ContextCompactionService(
         message_store=message_store,
-        session_memory_store=session_memory_store,
         result_store=result_store,
         hooks=hooks,
         trace_recorder=trace_recorder,
@@ -304,6 +380,7 @@ def build_runtime(
     guard = SandboxGuard(SandboxBoundary(cwd=workspace))
     permission_prompter = permission_prompter or BatchPermissionPrompter()
     file_state_cache = FileStateCache()
+    checkpoint_store = CheckpointStore(existing_state_dir(workspace) / "checkpoints")
     attachment_reader = AttachmentFileReader(
         guard=guard,
         permission_policy=permission_policy,
@@ -313,12 +390,16 @@ def build_runtime(
         workspace=workspace,
         reader=attachment_reader,
         file_state_cache=file_state_cache,
+        checkpoint_store=checkpoint_store,
         shared_sources=(
             BackgroundTaskNotificationSource(background_task_manager),
         ),
     )
     current_model_context = CurrentModelContext()
-    model_client = create_model_client(workspace / ".env")
+    model_client = create_model_client(
+        provider_config_path,
+        allow_process_env=allow_provider_process_env,
+    )
     memory_selector = RelevantMemorySelector(
         model_client=model_client,
         trace_recorder=trace_recorder,
@@ -332,6 +413,7 @@ def build_runtime(
                 long_term_memory_store,
                 memory_selector,
                 inner=compaction_service,
+                trace_recorder=trace_recorder,
             )
         ),
     )
@@ -348,15 +430,6 @@ def build_runtime(
         trace_recorder=trace_recorder,
     )
     runner_ref["runner"] = subagent_runner
-    session_memory_extractor = SessionMemoryExtractionService(
-        session_memory_store,
-        subagent_runner=subagent_runner,
-        trace_recorder=trace_recorder,
-    )
-    background_session_memory_extractor = BackgroundSessionMemoryExtractor(
-        session_memory_extractor,
-        background_task_manager,
-    )
     long_term_memory_extractor = LongTermMemoryExtractionService(
         long_term_memory_store,
         subagent_runner=subagent_runner,
@@ -371,9 +444,12 @@ def build_runtime(
             background_task_manager=background_task_manager,
         ),
     )
-    compaction_service.bind_runtime(subagent_runner=subagent_runner)
-    compaction_service.bind_runtime(session_memory_extractor=session_memory_extractor)
-    registry.register(agent_descriptor(subagent_runner, background_task_manager))
+    compaction_service.bind_runtime(
+        model_client=model_client,
+        current_model_context=current_model_context,
+    )
+    for descriptor in _subagent_descriptors(subagent_runner, background_task_manager):
+        registry.register(descriptor)
     tool_executor = RegistryToolExecutor(
         registry,
         guard=guard,
@@ -395,12 +471,12 @@ def build_runtime(
         current_model_context=current_model_context,
         hooks=hooks,
         compaction_service=compaction_service,
-        session_memory_extractor=background_session_memory_extractor,
         error_log_recorder=error_log_recorder,
     )
     config = model_client.config
     return CliRuntime(
         workspace=workspace,
+        provider_config_path=provider_config_path,
         state=state,
         message_store=message_store,
         registry=registry,
@@ -417,8 +493,6 @@ def build_runtime(
         current_model_context=current_model_context,
         subagent_runner=subagent_runner,
         compaction_service=compaction_service,
-        session_memory_store=session_memory_store,
-        session_memory_extractor=session_memory_extractor,
         attachment_collector=attachment_collector,
         skill_provider=skill_provider,
         mcp_manager=mcp_manager,
@@ -436,6 +510,7 @@ def build_runtime(
         long_term_memory_extractor_ref=long_term_memory_extractor_ref,
         plan_store=plan_store,
         user_question_prompter=user_question_prompter,
+        checkpoint_store=checkpoint_store,
     )
 
 
@@ -602,6 +677,7 @@ def build_unconfigured_runtime(workspace: Path) -> CliRuntime:
     """
 
     workspace = workspace.resolve()
+    provider_config_path = _provider_config_path(workspace)
     state = RuntimeState()
     state.metadata["workspace"] = str(workspace)
     message_store = MessageStore(
@@ -610,10 +686,13 @@ def build_unconfigured_runtime(workspace: Path) -> CliRuntime:
         cwd=workspace,
     )
     trace_sink = JsonlTraceSink(sessions_dir(workspace), state.session_id)
+    trace_settings = load_trace_settings(provider_config_path)
     trace_recorder = TraceRecorder(
         session_id=state.session_id,
         workspace=workspace,
         sink=trace_sink,
+        trace_level=trace_settings.trace_level,
+        max_tool_result_chars=trace_settings.max_tool_result_chars,
     )
     error_log_sink = JsonlErrorLogSink(sessions_dir(workspace), state.session_id)
     error_log_recorder = ErrorLogRecorder(
@@ -623,12 +702,31 @@ def build_unconfigured_runtime(workspace: Path) -> CliRuntime:
     )
     return CliRuntime(
         workspace=workspace,
+        provider_config_path=_provider_config_path(workspace),
         state=state,
         message_store=message_store,
         configured=False,
         trace_recorder=trace_recorder,
         error_log_recorder=error_log_recorder,
     )
+
+
+def _provider_config_path(workspace: Path) -> Path:
+    """Resolve an optional shared provider configuration for CLI launchers.
+
+    The workspace remains the agent's filesystem boundary.  A launcher can
+    point ``NERVURE_CONFIG_PATH`` at a local, Git-ignored provider file so a
+    user does not need to copy credentials into every target repository.
+    """
+
+    override = (
+        os.environ.get("NERVURE_CONFIG_PATH")
+        or os.environ.get("ONECODE_CONFIG_PATH")
+        or ""
+    ).strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return workspace / ".env"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -640,7 +738,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_batch(workspace)
     if not sys.stdout.isatty():
         print(
-            "Error: OneCode CLI requires an interactive terminal: stdout is not a TTY. "
+            "Error: Nervure CLI requires an interactive terminal: stdout is not a TTY. "
             "Run `uv run python -m ui.cli.app` from a real terminal window, "
             "or pipe a prompt into the command to use batch mode.",
             file=sys.stderr,
@@ -653,17 +751,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     # stdio servers on startup rather than having them silently skipped.
     from ui.cli.terminal.interaction_host import TerminalInteractionHost
     from ui.cli.terminal.permission_prompt import TtyPermissionPrompter
+    from ui.cli.terminal.question_prompt import TtyUserQuestionPrompter
     from ui.cli.terminal.repl import InlineRepl
     from ui.cli.terminal.trust_prompt import default_trust_prompt
 
     try:
         interaction_host = TerminalInteractionHost()
         permission_prompter = TtyPermissionPrompter(interaction_host)
+        user_question_prompter = TtyUserQuestionPrompter(interaction_host)
         try:
             runtime = build_runtime(
                 workspace,
                 trust_prompt=default_trust_prompt,
                 permission_prompter=permission_prompter,
+                user_question_prompter=user_question_prompter,
                 mcp_trust_mode="prompt",
             )
         except ProviderError:
@@ -672,6 +773,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         repl = InlineRepl(
             runtime,
             permission_prompter=permission_prompter,
+            user_question_prompter=user_question_prompter,
             interaction_host=interaction_host,
         )
         return repl.run()

@@ -54,29 +54,29 @@ def key_value_table(*, title: str | None = None) -> Table:
     table = Table.grid(padding=(0, 2))
     if title:
         table.title = title
-    table.add_column(style="onecode.subtle", no_wrap=True)
+    table.add_column(style="nervure.subtle", no_wrap=True)
     table.add_column()
     return table
 
 
-def titled_section(title: str, body: object, *, style: str = "onecode.title") -> Group:
+def titled_section(title: str, body: object, *, style: str = "nervure.title") -> Group:
     """渲染“仅顶部一条全宽横线 + 彩色标题 + 默认正文”的区块（替代旧的四边框 Panel）。"""
 
     heading = Rule(
         Text(f" {title} ", style=style),
         characters="─",
-        style="onecode.subtle",
+        style="nervure.subtle",
         align="left",
     )
     return Group(heading, body)
 
 
-def titled_panel(title: str, renderable: object, *, style: str = "onecode.info") -> Group:
+def titled_panel(title: str, renderable: object, *, style: str = "nervure.info") -> Group:
     return titled_section(title, renderable, style=style)
 
 
 def empty_panel(title: str, message: str) -> Group:
-    return titled_section(title, Text(f"{SYMBOLS.info} {message}", style="onecode.subtle"))
+    return titled_section(title, Text(f"{SYMBOLS.info} {message}", style="nervure.subtle"))
 
 
 def strip_ansi(text: str) -> str:

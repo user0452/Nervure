@@ -134,23 +134,6 @@ class FollowupToolExecutor:
             )
 
 
-@dataclass
-class NonBlockingSessionMemoryExtractor:
-    called: bool = False
-
-    async def maybe_extract_after_model_response(
-        self,
-        messages: tuple[dict[str, Any], ...],
-        state: RuntimeState,
-        *,
-        assistant_message: dict[str, Any],
-        tool_calls: tuple[Any, ...],
-        usage: Any | None = None,
-    ) -> None:
-        _ = messages, state, assistant_message, tool_calls, usage
-        self.called = True
-
-
 def make_loop(
     responses: list[LLMResponse],
     *,
@@ -230,40 +213,6 @@ def test_loop_stops_without_tool_calls(tmp_path: Path) -> None:
     assert len(model_client.snapshots) == 1
     assert tool_executor.calls == []
     assert message_store.current_messages()[-1] == assistant_message("done")
-
-
-def test_loop_returns_completed_after_session_memory_scheduler_returns(
-    tmp_path: Path,
-) -> None:
-    state = RuntimeState()
-    message_store = MessageStore(
-        transcript_root=tmp_path / ".onecode",
-        session_id=state.session_id,
-        flush_interval_seconds=60,
-    )
-    model_client = FakeModelClient(
-        [
-            LLMResponse(
-                assistant_message=assistant_message("done"),
-                final_text="done",
-            )
-        ]
-    )
-    extractor = NonBlockingSessionMemoryExtractor()
-    loop = AgentLoop(
-        state=state,
-        message_store=message_store,
-        context_engine=ContextEngine(message_store),
-        model_client=model_client,
-        tool_executor=FakeToolExecutor(),
-        session_memory_extractor=extractor,
-    )
-
-    events = collect_events(loop, "hello")
-
-    assert extractor.called is True
-    assert events[-1].type == "completed"
-    assert events[-1].text == "done"
 
 
 def test_loop_persists_attachment_but_model_sees_projection(tmp_path: Path) -> None:
@@ -548,6 +497,16 @@ def test_loop_records_interaction_model_and_transition_trace(tmp_path: Path) -> 
     assert model_end["attributes"]["input_tokens"] == 3
     assert model_end["attributes"]["output_tokens"] == 5
     assert "hello" not in json.dumps(records, ensure_ascii=False)
+    assert "done" not in json.dumps(records, ensure_ascii=False)
+    context_end = next(
+        record
+        for record in records
+        if record["name"] == "context_prepare" and record["record_type"] == "span_end"
+    )
+    assert len(context_end["attributes"]["system_prompt_hash"]) == 16
+    assert len(context_end["attributes"]["tool_schema_hash"]) == 16
+    assert context_end["attributes"]["message_roles"] == ["user"]
+    assert context_end["attributes"]["estimated_tokens"] > 0
 
 
 def test_loop_reactive_compacts_once_after_context_limit(tmp_path: Path) -> None:

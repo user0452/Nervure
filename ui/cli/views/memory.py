@@ -1,4 +1,4 @@
-"""Session and long-term memory views."""
+"""Long-term memory view."""
 
 from __future__ import annotations
 
@@ -11,23 +11,8 @@ from ui.cli.views.common import display_path, preview, titled_section
 
 def render_memory(runtime: CliRuntime) -> Group:
     table = Table.grid(padding=(0, 2))
-    table.add_column(style="onecode.subtle", no_wrap=True)
+    table.add_column(style="nervure.subtle", no_wrap=True)
     table.add_column()
-
-    session_store = runtime.session_memory_store
-    if session_store is None:
-        table.add_row("session memory file", "disabled")
-    else:
-        memory = session_store.read()
-        table.add_row(
-            "session memory file",
-            display_path(session_store.path, runtime.workspace),
-        )
-        table.add_row("session memory exists", "yes" if memory is not None else "no")
-        if memory is not None:
-            table.add_row("session updated", memory.updated_at or "unknown")
-            table.add_row("session source", memory.source)
-            table.add_row("covered turns", str(memory.covered_turn_count))
 
     store = runtime.long_term_memory_store
     if store is None:
@@ -41,15 +26,6 @@ def render_memory(runtime: CliRuntime) -> Group:
         )
         table.add_row("long-term memory topics", str(len(topics)))
 
-    extraction = runtime.state.metadata.get("session_memory_extraction")
-    if isinstance(extraction, dict):
-        table.add_row(
-            "session extraction",
-            (
-                f"{extraction.get('last_status', extraction.get('last_decision', 'unknown'))} "
-                f"running={extraction.get('running', False)}"
-            ),
-        )
     long_extraction = runtime.state.metadata.get("long_term_memory_extraction")
     if isinstance(long_extraction, dict):
         table.add_row(
@@ -66,4 +42,4 @@ def render_memory(runtime: CliRuntime) -> Group:
             preview(", ".join(str(item) for item in surfaced[:5])),
         )
 
-    return titled_section("Memory", table, style="onecode.info")
+    return titled_section("Memory", table, style="nervure.info")

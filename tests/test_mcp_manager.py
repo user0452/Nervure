@@ -69,7 +69,11 @@ def test_mcp_connection_manager_discovers_and_calls_stdio_tools(tmp_path: Path) 
     asyncio.run(scenario())
 
 
-def test_mcp_connection_manager_discovers_and_calls_sse_tools(tmp_path: Path) -> None:
+def test_mcp_connection_manager_discovers_and_calls_sse_tools(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    _poison_proxy_env(monkeypatch)
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("fake-sse", instructions="Use SSE instructions.")
@@ -219,7 +223,9 @@ def test_mcp_stdio_env_uses_allowlist_and_explicit_env(
 
 def test_mcp_connection_manager_discovers_and_calls_streamable_http_tools(
     tmp_path: Path,
+    monkeypatch: Any,
 ) -> None:
+    _poison_proxy_env(monkeypatch)
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("fake-http", instructions="Use HTTP instructions.")
@@ -291,6 +297,21 @@ def test_mcp_connection_manager_reconnects_once_after_call_failure(
         assert manager.disconnects == ["docs"]
 
     asyncio.run(scenario())
+
+
+def _poison_proxy_env(monkeypatch: Any) -> None:
+    bad_proxy = "http://127.0.0.1:1"
+    for key in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ):
+        monkeypatch.setenv(key, bad_proxy)
+    for key in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(key, raising=False)
 
 
 @contextmanager

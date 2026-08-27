@@ -28,7 +28,7 @@ def bind_session(session_id) / clear_for_new_session(new_session_id) / flush_tra
 @classmethod from_transcript(transcript_store, state) -> MessageStore
 ```
 
-内部消息角色：`user`、`assistant`、`tool_result`、`attachment`。OneCode 内部保留 provider-neutral `tool_result`，provider adapter 投影为目标 wire format；`attachment` 是 durable internal role，由 context preparer 在调用前投影后隐藏（详见 `attachment-architecture.md`）。`current_messages()` 返回 deepcopy，避免外部直接修改内部状态。
+内部消息角色：`user`、`assistant`、`tool_result`、`attachment`。Nervure 内部保留 provider-neutral `tool_result`，provider adapter 投影为目标 wire format；`attachment` 是 durable internal role，由 context preparer 在调用前投影后隐藏（详见 `attachment-architecture.md`）。`current_messages()` 返回 deepcopy，避免外部直接修改内部状态。
 
 ### PreparedContext / ContextSnapshot
 
@@ -54,8 +54,8 @@ def adjust_start_index_to_preserve_tool_pairs(messages, start_index) -> int
 flowchart TD
   User["append_user / append_assistant / append_tool_results / append_attachments"] --> Mem["MessageStore 内存链"]
   Mem --> Tr["JsonlTranscriptStore"]
-  Tr --> Jsonl[".onecode/sessions/&lt;session&gt;/messages.jsonl"]
-  Tr -->|tool_result content > 50KB| Ext[".onecode/sessions/&lt;session&gt;/tool-results/&lt;id&gt;.txt"]
+  Tr --> Jsonl[".nervure/sessions/&lt;session&gt;/messages.jsonl"]
+  Tr -->|tool_result content > 50KB| Ext[".nervure/sessions/&lt;session&gt;/tool-results/&lt;id&gt;.txt"]
 
   Mem -->|current_messages| Engine["ContextEngine.build_for_model"]
   Engine --> Prep["ContextPreparer 链"]
@@ -85,7 +85,7 @@ flowchart TD
 
 ## 持久化路径
 
-- 消息：`.onecode/sessions/<session_id>/messages.jsonl`
-- 外置 tool result：`.onecode/sessions/<session_id>/tool-results/<id>.txt`
+- 消息：`.nervure/sessions/<session_id>/messages.jsonl`（兼容读取旧 `.onecode/sessions/`）
+- 外置 tool result：`.nervure/sessions/<session_id>/tool-results/<id>.txt`
 
 transcript 是会话恢复和上下文治理的事实来源，但不是完整 durable result store 的替代品。

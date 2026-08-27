@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from infrastructure.filesystem.onecode_paths import sessions_dir
+from infrastructure.filesystem.nervure_paths import sessions_dir
 from services.observability import JsonlTraceSink, TraceRecorder
 from services.observability.sanitize import sanitize_attributes
 
@@ -84,6 +84,37 @@ def test_span_exit_tolerates_different_context_on_async_cancellation(
         "span_end",
     ]
     assert records[-1]["name"] == "stream"
+
+
+def test_debug_trace_keeps_nonsecret_text_and_redacts_secret_patterns(tmp_path: Path) -> None:
+    sink = JsonlTraceSink(sessions_dir(tmp_path), "session-debug")
+    recorder = TraceRecorder(
+        session_id="session-debug",
+        workspace=tmp_path,
+        sink=sink,
+        trace_level="debug",
+    )
+
+    recorder.event(
+        "debug_payload",
+        {
+            "assistant_visible_text": "Please inspect this result.",
+            "tool_arguments": {
+                "api_key": "sk-secret",
+                "value": "visible",
+            },
+            "tool_result_text": "Bearer abc123 password=hunter2; safe text",
+        },
+    )
+    recorder.flush()
+
+    record = read_jsonl(sink.trace_path)[0]
+    attributes = record["attributes"]
+    assert attributes["assistant_visible_text"] == "Please inspect this result."
+    assert attributes["tool_arguments"]["api_key"] == "[redacted]"
+    assert attributes["tool_arguments"]["value"] == "visible"
+    assert "abc123" not in attributes["tool_result_text"]
+    assert "hunter2" not in attributes["tool_result_text"]
 
 
 def test_sanitizer_redacts_sensitive_metadata_and_paths(tmp_path: Path) -> None:

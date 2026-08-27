@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from core.runtime_state import InteractionKind, PermissionMode
+
 from dataclasses import dataclass
 from pathlib import Path
 import shlex
@@ -16,7 +18,7 @@ from services.plans import (
     exit_plan_mode,
 )
 from services.tasks import TaskStoreError, resolve_task_list_id
-from infrastructure.filesystem.onecode_paths import sessions_dir
+from infrastructure.filesystem.nervure_paths import session_roots, sessions_dir
 from services.permissions import (
     PermissionBehavior,
     PermissionUpdate,
@@ -62,7 +64,7 @@ def command_registry() -> tuple[CommandSpec, ...]:
     return (
         CommandSpec("status", "Show runtime status.", _status),
         CommandSpec("usage", "Show token and turn usage.", _usage),
-        CommandSpec("memory", "Show session and long-term memory state.", _memory),
+        CommandSpec("memory", "Show long-term memory state.", _memory),
         CommandSpec(
             "permissions",
             "Show permission grants or edit project rules.",
@@ -166,11 +168,37 @@ def _permissions(runtime: CliRuntime, invocation: CommandInvocation) -> CommandR
             renderable=renderer.render_permissions(runtime),
             presentation="page",
         )
+    if invocation.args[0].lower() == "mode":
+        if len(invocation.args) < 2:
+            return CommandResult(
+                renderable=renderer.render_error(
+                    "Usage: /permissions mode normal|full"
+                )
+            )
+        mode_text = invocation.args[1].lower()
+        if mode_text in {"normal", "default"}:
+            selected_mode = PermissionMode.DEFAULT
+        elif mode_text in {"full", "full_access", "full-access"}:
+            selected_mode = PermissionMode.FULL_ACCESS
+        else:
+            return CommandResult(
+                renderable=renderer.render_error(
+                    "Permission mode must be normal or full."
+                )
+            )
+        if runtime.state.is_plan_mode():
+            runtime.state.plan.pre_plan_mode = selected_mode
+            message = f"Permission mode will become {selected_mode.value} after plan mode exits."
+        else:
+            runtime.state.permission_mode = selected_mode
+            message = f"Permission mode: {selected_mode.value}."
+        return CommandResult(renderable=renderer.render_text(message))
+
     parsed = _parse_permissions_args(invocation.arg_text)
     if parsed is None:
         return CommandResult(
             renderable=renderer.render_error(
-                "Usage: /permissions add|remove|replace allow|deny|ask <rule...>"
+                "Usage: /permissions mode normal|full OR add|remove|replace allow|deny|ask <rule...>"
             )
         )
     action, behavior_text, raw_rules = parsed
@@ -250,9 +278,9 @@ def _plan(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     if subcommand == "open":
         return _plan_open(runtime, plan_store)
     if subcommand == "approve":
-        return _plan_approve(runtime, plan_store)
+        return _plan_approve(runtime, plan_store, remaining)
     if subcommand == "reject":
-        return _plan_reject(runtime, plan_store)
+        return _plan_reject(runtime, plan_store, remaining)
     if subcommand == "show":
         return _plan_show(runtime, plan_store)
 
@@ -283,9 +311,9 @@ def _plan_subcommand(invocation: CommandInvocation) -> tuple[str, str]:
     if head in {"open", "edit", "path"}:
         return "open", ""
     if head in {"approve", "accept", "yes"}:
-        return "approve", ""
+        return "approve", " ".join(invocation.args[1:]).strip()
     if head in {"reject", "deny", "no"}:
-        return "reject", ""
+        return "reject", " ".join(invocation.args[1:]).strip()
     return "enter", invocation.arg_text
 
 
@@ -321,7 +349,11 @@ def _plan_show(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
     )
 
 
-def _plan_approve(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
+def _plan_approve(
+    runtime: CliRuntime,
+    plan_store: PlanStore,
+    feedback: str = "",
+) -> CommandResult:
     if not runtime.state.is_plan_mode():
         return CommandResult(
             renderable=renderer.render_error(
@@ -329,6 +361,14 @@ def _plan_approve(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
             )
         )
     exit_plan_mode(runtime.state, plan_store, approved=True)
+    if (
+        runtime.state.interaction is not None
+        and runtime.state.interaction.kind == InteractionKind.PLAN_REVIEW
+    ):
+        runtime.state.resume()
+    implementation_prompt = "Plan approved. Begin implementation according to the approved plan."
+    if feedback:
+        implementation_prompt += f" Additional instruction: {feedback}"
     # Inject the post-exit attachment immediately so the user-visible turn
     # also carries the "approved" message in the transcript.
     attachments = build_plan_attachments_for_state(runtime.state, plan_store)
@@ -337,10 +377,15 @@ def _plan_approve(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
             f"Plan approved. Exited plan mode (now in {runtime.state.permission_mode.value})."
         ),
         attachments=attachments,
+        queued_prompt=implementation_prompt,
     )
 
 
-def _plan_reject(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
+def _plan_reject(
+    runtime: CliRuntime,
+    plan_store: PlanStore,
+    feedback: str = "",
+) -> CommandResult:
     if not runtime.state.is_plan_mode():
         return CommandResult(
             renderable=renderer.render_error(
@@ -348,12 +393,18 @@ def _plan_reject(runtime: CliRuntime, plan_store: PlanStore) -> CommandResult:
             )
         )
     exit_plan_mode(runtime.state, plan_store, approved=False)
+    if (
+        runtime.state.interaction is not None
+        and runtime.state.interaction.kind == InteractionKind.PLAN_REVIEW
+    ):
+        runtime.state.resume()
     attachments = build_plan_attachments_for_state(runtime.state, plan_store)
     return CommandResult(
         renderable=renderer.render_text(
             "Plan rejected. The agent remains in plan mode and can update the plan."
         ),
         attachments=attachments,
+        queued_prompt=feedback or None,
     )
 
 
@@ -469,24 +520,25 @@ def _exit(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
 
 
 def _resume_candidates(runtime: CliRuntime, text: str) -> Iterable[str]:
-    root = sessions_dir(runtime.workspace)
-    if not root.exists():
+    roots = tuple(root for root in session_roots(runtime.workspace) if root.exists())
+    if not roots:
         return ()
     prefix = text.strip()
     candidates: list[str] = []
     summaries_by_id = {
         summary.session_id: summary for summary in list_session_summaries(runtime.workspace)
     }
-    for messages_path in sorted(root.glob("*/messages.jsonl")):
-        session_id = messages_path.parent.name
-        if not prefix or session_id.startswith(prefix):
-            candidates.append(session_id)
-        summary = summaries_by_id.get(session_id)
-        if summary is not None and prefix and summary.title.lower().startswith(prefix.lower()):
-            candidates.append(summary.title)
-        display_path = str(messages_path)
-        if prefix and display_path.startswith(prefix):
-            candidates.append(display_path)
+    for root in roots:
+        for messages_path in sorted(root.glob("*/messages.jsonl")):
+            session_id = messages_path.parent.name
+            if not prefix or session_id.startswith(prefix):
+                candidates.append(session_id)
+            summary = summaries_by_id.get(session_id)
+            if summary is not None and prefix and summary.title.lower().startswith(prefix.lower()):
+                candidates.append(summary.title)
+            display_path = str(messages_path)
+            if prefix and display_path.startswith(prefix):
+                candidates.append(display_path)
     return tuple(dict.fromkeys(candidates))
 
 
@@ -621,5 +673,5 @@ def _render_permission_update(update: PermissionUpdate):
     rules = ", ".join(permission_rule_value_to_string(rule) for rule in update.rules)
     return Text(
         f"{SYMBOLS.success} {action} project {update.behavior} permission rule(s): {rules}",
-        style="onecode.success",
+        style="nervure.success",
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,23 @@ from tools.glob.prompt import PROMPT
 
 
 DEFAULT_HEAD_LIMIT = 100
+DEFAULT_EXCLUDED_DIRS = frozenset(
+    {
+        ".git",
+        ".nervure",
+        ".onecode",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".venv",
+        "venv",
+        "node_modules",
+        "build",
+        "dist",
+        ".cache",
+    }
+)
 
 
 class GlobInput(BaseModel):
@@ -148,16 +166,32 @@ def _handle(
     filtered_count = 0
     guard_cache: dict[Path, bool] = {}
 
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        relative_to_root = _slash_path(path.relative_to(root))
-        if not fnmatch.fnmatchcase(relative_to_root, parsed.pattern):
-            continue
-        if not _path_allowed(path, runtime, guard_cache):
-            filtered_count += 1
-            continue
-        candidates.append(path)
+    # ``Path.rglob`` cannot prune a subtree once it enters it.  Walking with
+    # ``os.walk`` keeps the default orientation query cheap and prevents
+    # generated/VCS state from leaking into broad patterns such as ``**/*``.
+    # An explicitly selected excluded directory remains searchable because
+    # its own root is not pruned.
+    allow_excluded_root = parsed.path is not None and root.name in DEFAULT_EXCLUDED_DIRS
+    for current, directories, filenames in os.walk(root):
+        if not (allow_excluded_root and Path(current) == root):
+            directories[:] = sorted(
+                directory
+                for directory in directories
+                if directory not in DEFAULT_EXCLUDED_DIRS
+            )
+        for filename in sorted(filenames):
+            path = Path(current) / filename
+            relative_to_root = _slash_path(path.relative_to(root))
+            if not fnmatch.fnmatchcase(relative_to_root, parsed.pattern):
+                continue
+            if not _path_allowed(path, runtime, guard_cache):
+                filtered_count += 1
+                continue
+            candidates.append(path)
+        if allow_excluded_root:
+            # Only the explicitly requested root is exempt; nested generated
+            # directories still follow the normal exclusion rule.
+            allow_excluded_root = False
 
     def sort_key(path: Path) -> tuple[float, str]:
         return (-_mtime(path), _display_path(path, runtime))

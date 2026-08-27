@@ -1,4 +1,4 @@
-"""Stable OneCode-side MCP data types."""
+"""Stable Nervure-side MCP data types."""
 
 from __future__ import annotations
 

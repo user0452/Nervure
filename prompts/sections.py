@@ -7,7 +7,7 @@ from hashlib import sha256
 
 from prompts.runtime_context import PromptRuntimeContext
 
-PROMPT_VERSION = "dynamic-system-prompt-v1"
+PROMPT_VERSION = "dynamic-system-prompt-v3"
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class PromptSection:
 def identity_section(context: PromptRuntimeContext) -> PromptSection:
     del context
     body = (
-        "You are OneCode, a coding agent running inside this workspace. "
+        "You are Nervure, a coding agent running inside this workspace. "
         "Your job is to help the user complete code work using repository facts "
         "and the tools currently available to this runtime."
     )
@@ -46,6 +46,8 @@ def behavior_rules_section(context: PromptRuntimeContext) -> PromptSection:
             "- Use available tools when you need to inspect files or search the workspace.",
             "- Respect sandbox and guard decisions. A denied capability is unavailable.",
             "- Do not claim that you ran commands, read files, or changed code unless that happened.",
+            "- Keep the user informed during non-trivial work with brief user-facing progress updates. Before the first meaningful tool call, acknowledge the request and state the immediate action you are about to take.",
+            "- During longer work, add another short update after a meaningful finding or before switching phases. Keep updates concrete and concise; do not narrate every tool call, reveal private chain-of-thought, or repeat generic status text.",
             "- Keep runtime boundaries clear: main loop orchestration, tools for actions, prompts for guidance, guard for safety, and hooks for lifecycle extension.",
             "- Do not rely on model promises for safety; executable tool and guard paths define what is allowed.",
         ]
@@ -119,7 +121,7 @@ def verification_and_reporting_section(context: PromptRuntimeContext) -> PromptS
 def instruction_memory_section(context: PromptRuntimeContext) -> PromptSection:
     return PromptSection(
         key="instruction_memory",
-        title="OneCode Instructions",
+        title="Nervure Instructions",
         body=context.instruction_memory,
         fingerprint=_fingerprint(
             "instruction_memory",

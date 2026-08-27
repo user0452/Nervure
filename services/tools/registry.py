@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from services.tools.schema import descriptor_to_openai_tool_schema
 from services.tools.types import ToolDescriptor
+from services.tools.discovery import ToolDiscovery
 
 if TYPE_CHECKING:
     from core.runtime_state import RuntimeState
@@ -21,11 +22,13 @@ class ToolRegistry:
         disabled_tools: Iterable[str] = (),
         denied_tools: Iterable[str] = (),
         permission_policy: PermissionPolicy | None = None,
+        discovery: ToolDiscovery | None = None,
     ) -> None:
         self._descriptors: dict[str, ToolDescriptor] = {}
         self._disabled_tools = {name for name in disabled_tools if name}
         self._denied_tools = {name for name in denied_tools if name}
         self._permission_policy = permission_policy
+        self._discovery = discovery
         for descriptor in descriptors:
             self.register(descriptor)
 
@@ -48,7 +51,7 @@ class ToolRegistry:
 
     def visible_descriptors(self, state: RuntimeState) -> tuple[ToolDescriptor, ...]:
         hidden_tools = self._hidden_tool_names(state)
-        return tuple(
+        visible = tuple(
             descriptor
             for descriptor in self.descriptors()
             if descriptor.name not in hidden_tools
@@ -57,6 +60,10 @@ class ToolRegistry:
                 or self._permission_policy.is_tool_visible(descriptor, state)
             )
         )
+        query = state.metadata.get("tool_discovery_query")
+        if self._discovery is not None and isinstance(query, str):
+            return self._discovery.select(visible, query)
+        return visible
 
     def tool_schemas(self, state: RuntimeState) -> tuple[dict[str, Any], ...]:
         return tuple(

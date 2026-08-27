@@ -77,7 +77,10 @@ def test_registry_generates_search_tool_schemas_and_prompts() -> None:
     assert [schema["function"]["name"] for schema in schemas] == ["glob", "grep"]
     assert schemas[0]["function"]["parameters"]["additionalProperties"] is False
     assert schemas[1]["function"]["parameters"]["properties"]["-i"]["type"] == "boolean"
-    assert [prompt.split(":", 1)[0] for prompt in prompts] == ["glob", "grep"]
+    assert len(prompts) == 2
+    assert all(prompt.startswith("Purpose:") for prompt in prompts)
+    assert "Find files by pathname pattern" in prompts[0]
+    assert "Search file contents with ripgrep" in prompts[1]
 
 
 def test_search_tools_classify_as_read_only_with_result_budgets() -> None:
@@ -148,6 +151,39 @@ def test_glob_returns_filtered_paginated_files(tmp_path: Path) -> None:
     assert result.metadata["num_files"] == 1
     assert result.metadata["total_matches_before_pagination"] == 2
     assert result.metadata["truncated"] is True
+
+
+def test_glob_excludes_generated_directories_but_explicit_root_remains_searchable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "src").mkdir()
+    (workspace / "src" / "app.py").write_text("app", encoding="utf-8")
+    for directory, filename in (
+        (".git", "config"),
+        (".nervure", "state"),
+        ("__pycache__", "cache.pyc"),
+        ("src/.pytest_cache", "lastfailed"),
+    ):
+        target = workspace / directory
+        target.mkdir(parents=True)
+        (target / filename).write_text("internal", encoding="utf-8")
+
+    executor, state, _ = make_runtime(workspace)
+    broad = execute_one(executor, state, "glob", {"pattern": "**/*"})
+
+    assert "src/app.py" in broad.content
+    for excluded in (".git/config", ".nervure/state", "__pycache__/cache.pyc", "src/.pytest_cache/lastfailed"):
+        assert excluded not in broad.content
+
+    explicit = execute_one(
+        executor,
+        state,
+        "glob",
+        {"pattern": "*", "path": ".nervure"},
+    )
+    assert "state" in explicit.content
 
 
 def test_search_root_guard_blocks_before_handler(tmp_path: Path) -> None:
@@ -331,3 +367,78 @@ def test_grep_real_ripgrep_smoke(tmp_path: Path) -> None:
     assert result.is_error is False
     assert "a.py" in result.content
     assert "b.txt" not in result.content
+
+
+def test_grep_excludes_generated_directories_by_default(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "src").mkdir()
+    (workspace / "src" / "app.py").write_text("needle\n", encoding="utf-8")
+    (workspace / ".nervure").mkdir()
+    (workspace / ".nervure" / "state").write_text("needle\n", encoding="utf-8")
+    _, _, runtime = make_runtime(workspace)
+    runner = FakeRipgrepRunner(
+        RipgrepResult(
+            returncode=0,
+            stdout="src/app.py:1:needle\n",
+            stderr="",
+        )
+    )
+
+    result = _handle_with_runner(
+        {"pattern": "needle", "path": ".", "output_mode": "content"},
+        runtime,
+        runner,
+    )
+
+    assert "src/app.py:1:needle" in result.content
+    assert ".nervure/state" not in result.content
+    args = runner.calls[0][0]
+    assert any(
+        args[index : index + 2] == ["--glob", "!**/.nervure/**"]
+        for index in range(len(args) - 1)
+    )
+
+
+def test_grep_excludes_nested_generated_directories_but_explicit_root_is_searchable(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    nested = workspace / "src" / ".nervure"
+    nested.mkdir(parents=True)
+    (nested / "nested.txt").write_text("needle\n", encoding="utf-8")
+    explicit = workspace / ".nervure"
+    explicit.mkdir()
+    (explicit / "state.txt").write_text("needle\n", encoding="utf-8")
+    (workspace / ".config").write_text("needle\n", encoding="utf-8")
+    _, _, runtime = make_runtime(workspace)
+
+    broad_runner = FakeRipgrepRunner(
+        RipgrepResult(returncode=0, stdout=".config:1:needle\n", stderr="")
+    )
+    broad = _handle_with_runner(
+        {"pattern": "needle", "path": ".", "output_mode": "content"},
+        runtime,
+        broad_runner,
+    )
+    assert ".config:1:needle" in broad.content
+    args = broad_runner.calls[0][0]
+    assert ["--glob", "!**/.nervure/**"] in [
+        args[index : index + 2] for index in range(len(args) - 1)
+    ]
+
+    explicit_runner = FakeRipgrepRunner(
+        RipgrepResult(returncode=0, stdout="state.txt:1:needle\n", stderr="")
+    )
+    explicit_result = _handle_with_runner(
+        {"pattern": "needle", "path": ".nervure", "output_mode": "content"},
+        runtime,
+        explicit_runner,
+    )
+    assert explicit_result.is_error is False
+    assert "state.txt:1:needle" in explicit_result.content
+    explicit_args = explicit_runner.calls[0][0]
+    assert ["--glob", "!**/.nervure/**"] not in [
+        explicit_args[index : index + 2]
+        for index in range(len(explicit_args) - 1)
+    ]

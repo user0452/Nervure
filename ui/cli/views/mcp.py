@@ -17,18 +17,18 @@ def render_mcp(runtime: CliRuntime) -> Group:
     if runtime.mcp_manager is None:
         return titled_section(
             "MCP",
-            Text(f"{SYMBOLS.info} MCP: disabled", style="onecode.subtle"),
-            style="onecode.info",
+            Text(f"{SYMBOLS.info} MCP: disabled", style="nervure.subtle"),
+            style="nervure.info",
         )
     snapshot = runtime.mcp_manager.snapshot()
     if not snapshot.statuses:
         return titled_section(
             "MCP",
-            Text(f"{SYMBOLS.info} MCP: no servers configured", style="onecode.subtle"),
-            style="onecode.info",
+            Text(f"{SYMBOLS.info} MCP: no servers configured", style="nervure.subtle"),
+            style="nervure.info",
         )
 
-    servers = Table(title="Servers", box=None, show_header=True, header_style="onecode.subtle")
+    servers = Table(title="Servers", box=None, show_header=True, header_style="nervure.subtle")
     servers.add_column("state", no_wrap=True)
     servers.add_column("name")
     servers.add_column("transport")
@@ -45,7 +45,7 @@ def render_mcp(runtime: CliRuntime) -> Group:
             preview(status.error),
         )
 
-    tools = Table(title="Tools", box=None, show_header=True, header_style="onecode.subtle")
+    tools = Table(title="Tools", box=None, show_header=True, header_style="nervure.subtle")
     tools.add_column("server")
     tools.add_column("tool")
     tools.add_column("descriptor")
@@ -70,7 +70,7 @@ def render_mcp(runtime: CliRuntime) -> Group:
     else:
         tools.add_row("none", "", "", "", "")
 
-    return titled_section("MCP", Group(servers, Text(), tools), style="onecode.info")
+    return titled_section("MCP", Group(servers, Text(), tools), style="nervure.info")
 
 
 def _state_symbol(state: str) -> str:

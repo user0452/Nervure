@@ -1,4 +1,4 @@
-"""Dynamic system prompt assembly for OneCode."""
+"""Dynamic system prompt assembly for Nervure."""
 
 from prompts.assembler import DynamicPromptAssembler
 from prompts.cache import PromptSectionCache

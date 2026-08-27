@@ -70,7 +70,7 @@ manager 发布 `background_task_started`、`background_task_completed` 事件（
 
 ## 持久化路径
 
-- 输出文件：`{workspace}/.onecode/sessions/<session_id>/background-tasks/<task_id>.output`（`BackgroundTaskState.output_file` 存相对 workspace 路径）。
+- 输出文件：`{workspace}/.nervure/sessions/<session_id>/background-tasks/<task_id>.output`（`BackgroundTaskState.output_file` 存相对 workspace 路径）。已有 `.onecode/sessions/` 只作为 legacy session 的读取兼容路径。
 
 ## 当前限制
 

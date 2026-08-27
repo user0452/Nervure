@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 
+from ui.cli.terminal.activity import format_activity_details, format_activity_summary
 from ui.cli.terminal.markdown_rendering import render_cached_markdown
 from ui.cli.terminal.queue import QueuedInput
 from ui.cli.terminal.stream_state import (
@@ -179,7 +180,14 @@ def render_stream_body_ansi(
     # never visually fuses with the assistant text tail — that was
     # the layout bug the ExecPlan targets.
     visible_tools = state.visible_active_tools(limit=active_tool_limit)
-    if visible_tools:
+    # Activity groups replace the legacy per-tool panel once the runtime has
+    # supplied a complete ready->started call with identifying arguments.
+    activity_groups = [
+        group
+        for group in state.visible_activity_groups()
+        if not group.committed
+    ] if state.activity_enabled else []
+    if visible_tools and not activity_groups:
         if out_lines:
             # The assistant segment is present; insert a blank line
             # to create a stable visual boundary. We only need one
@@ -190,6 +198,17 @@ def render_stream_body_ansi(
         overflow = state.overflow_active_count(limit=active_tool_limit)
         if overflow > 0:
             out_lines.append(f"  …  {overflow} more tools running")
+
+    # 2b) Activity groups are the default semantic level for complete tool
+    # calls.  A group is one level only; expansion reveals its concise tool
+    # rows and never result/stdout content.
+    if activity_groups:
+        if out_lines:
+            out_lines.append("")
+        for group in activity_groups:
+            out_lines.append(format_activity_summary(group))
+            if state.activities_expanded:
+                out_lines.extend(format_activity_details(group))
 
     # 3) Queued preview (running-turn input box). Inserted only
     # when there is at least one queued input, so an idle turn
@@ -226,6 +245,9 @@ def render_status_fragments(state: "CliStreamUiState") -> FormattedText:
     """
 
     active_count = state.active_tool_count()
+    visible_groups = [
+        group for group in state.visible_activity_groups() if not group.committed
+    ] if state.activity_enabled else []
     first_active = next(
         (
             tool
@@ -241,6 +263,9 @@ def render_status_fragments(state: "CliStreamUiState") -> FormattedText:
     elif state.stream_mode == StreamMode.COMPLETED:
         label = "done"
         style = "class:stream-status-done"
+    elif visible_groups:
+        label = f"activity: {visible_groups[-1].title}"
+        style = "class:stream-status-tool"
     elif active_count > 1:
         label = f"tools: {active_count} running"
         style = "class:stream-status-tool"
@@ -264,10 +289,11 @@ def render_status_fragments(state: "CliStreamUiState") -> FormattedText:
         label = "thinking…"
         style = "class:stream-status"
 
+    suffix = "  (Ctrl+O expand/collapse, Esc to cancel)" if visible_groups else "  (Esc to cancel)"
     return FormattedText(
         [
-            ("class:stream-prefix", "onecode> "),
-            (style, f"{label}  (Esc to cancel)"),
+            ("class:stream-prefix", "Nervure> "),
+            (style, f"{label}{suffix}"),
         ]
     )
 

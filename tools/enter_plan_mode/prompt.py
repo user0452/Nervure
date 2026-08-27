@@ -1,7 +1,7 @@
 """Prompt text for the ``enter_plan_mode`` tool.
 
 The model reads this to understand when entering plan mode is appropriate. It
-matches the spirit of Claude Code's tool prompt while keeping OneCode's voice
+matches the spirit of Claude Code's tool prompt while keeping Nervure's voice
 concise.
 """
 
@@ -9,7 +9,7 @@ PROMPT = """\
 Use this tool proactively when you're about to start a non-trivial
 implementation task. Entering plan mode lets you investigate the codebase,
 interview the user about their requirements, and write a structured plan to
-``<workspace>/.onecode/plans/<slug>.md`` for review before any code changes
+``<workspace>/.nervure/plans/<slug>.md`` for review before any code changes
 are made.
 
 When to use this tool:

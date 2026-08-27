@@ -87,6 +87,19 @@ def _handle_for(plan_store: "PlanStore"):
         # the tool with the user's decision. If the model calls the tool
         # directly (no CLI prompter), we report "awaiting approval" and let
         # the runtime stay in plan mode.
+        from core.runtime_state import InteractionKind
+
+        runtime.state.suspend(
+            InteractionKind.PLAN_REVIEW,
+            interaction_id=runtime.tool_call_id or None,
+            payload={
+                "tool_name": "exit_plan_mode",
+                "tool_call_id": runtime.tool_call_id,
+                "plan_path": str(plan_file.path),
+                "plan_slug": plan_file.slug,
+                "summary": summary,
+            },
+        )
         payload = {
             "status": "awaiting_approval",
             "plan_path": str(plan_file.path),
@@ -131,7 +144,7 @@ def _classify_input(
     return ToolCallClassification(
         read_only=True,
         modifies_filesystem=False,
-        concurrency_safe=True,
+        concurrency_safe=False,
         targets=(
             ToolTarget(
                 kind="session_state",

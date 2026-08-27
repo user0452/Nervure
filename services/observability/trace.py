@@ -32,6 +32,8 @@ class TraceRecorder:
         trace_id: str | None = None,
         clock: Callable[[], datetime] | None = None,
         id_generator: Callable[[], str] | None = None,
+        trace_level: str = "normal",
+        max_tool_result_chars: int = 12_000,
     ) -> None:
         self.session_id = session_id
         self.workspace = workspace
@@ -39,10 +41,31 @@ class TraceRecorder:
         self.trace_id = trace_id or str(uuid.uuid4())
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._id_generator = id_generator or (lambda: str(uuid.uuid4()))
+        self.trace_level = trace_level if trace_level in {"normal", "debug"} else "normal"
+        self.max_tool_result_chars = max(0, int(max_tool_result_chars))
 
     @classmethod
     def noop(cls, session_id: str = "") -> "TraceRecorder":
         return cls(session_id=session_id, sink=NoopTraceSink())
+
+    @property
+    def is_debug(self) -> bool:
+        return self.trace_level == "debug"
+
+    def debug_text(
+        self,
+        value: str,
+        *,
+        max_chars: int | None = None,
+    ) -> tuple[str, bool]:
+        """Return debug text bounded for trace storage and its truncation flag."""
+
+        if not self.is_debug:
+            return "", False
+        limit = self.max_tool_result_chars if max_chars is None else max(0, max_chars)
+        if len(value) <= limit:
+            return value, False
+        return value[:limit], True
 
     @property
     def trace_path(self) -> Path | None:
@@ -136,6 +159,9 @@ class TraceRecorder:
         if attributes:
             merged.update(attributes)
         if error is not None:
+            error_metadata = getattr(error, "metadata", None)
+            if isinstance(error_metadata, Mapping):
+                merged.update(dict(error_metadata))
             merged.update(
                 {
                     "error_type": type(error).__name__,
@@ -160,6 +186,7 @@ class TraceRecorder:
         attributes: Mapping[str, Any] | None,
     ) -> None:
         try:
+            trace_attributes = {**dict(attributes or {}), "trace_level": self.trace_level}
             record = TraceRecord(
                 record_type=record_type,  # type: ignore[arg-type]
                 timestamp=self._timestamp(),
@@ -169,8 +196,9 @@ class TraceRecorder:
                 parent_span_id=parent_span_id,
                 name=name,
                 attributes=sanitize_attributes(
-                    attributes,
+                    trace_attributes,
                     workspace=self.workspace,
+                    debug=self.is_debug,
                 ),
             )
             self.sink.emit(record)

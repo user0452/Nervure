@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from core.runtime_state import RuntimeState
-from infrastructure.filesystem.onecode_paths import session_messages_path, session_dir, sessions_dir
+from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
 from services.background_tasks import BackgroundTaskManager
-from services.compaction import SessionMemoryStore
 from services.context.current_model_context import CurrentModelContext
 from services.context.message_store import MessageStore
 from services.context.snapshot import ContextSnapshot
@@ -82,20 +81,18 @@ class BindableFakeCompactionService(FakeCompactionService):
     def __init__(self) -> None:
         super().__init__()
         self.bound_message_store = None
-        self.bound_session_memory_store = None
         self.bound_result_store = None
 
     def bind_runtime(
         self,
         *,
         message_store: object | None = None,
-        session_memory_store: object | None = None,
         result_store: object | None = None,
-        subagent_runner: object | None = None,
+        model_client: object | None = None,
+        current_model_context: object | None = None,
     ) -> None:
-        _ = subagent_runner
+        _ = (model_client, current_model_context)
         self.bound_message_store = message_store
-        self.bound_session_memory_store = session_memory_store
         self.bound_result_store = result_store
 
 
@@ -225,7 +222,7 @@ def test_banner_shows_only_product_workspace_and_model(tmp_path: Path) -> None:
 
     output = strip_ansi(renderer.render_to_text(renderer.render_banner(runtime)))
 
-    assert "OneCode" in output
+    assert "Nervure" in output
     assert str(tmp_path) in output
     assert "test-model" in output
     assert "TestProvider" not in output
@@ -257,7 +254,7 @@ def test_status_command_shows_session_and_model(tmp_path: Path) -> None:
     assert "session-cli" in output
     assert "TestProvider" in output
     assert "test-model" in output
-    assert ".onecode" in output
+    assert ".nervure" in output
 
 
 def test_usage_command_shows_tokens_and_compaction(tmp_path: Path) -> None:
@@ -337,9 +334,6 @@ def test_clear_command_starts_new_session_without_deleting_old(tmp_path: Path) -
 def test_clear_command_rebinds_session_scoped_services(tmp_path: Path) -> None:
     runtime = make_runtime(tmp_path)
     old_session = runtime.state.session_id
-    old_memory_store = SessionMemoryStore(
-        runtime.message_store.transcript_store.session_dir
-    )
     executor = BindableFakeToolExecutor()
     compaction = BindableFakeCompactionService()
     current_context = CurrentModelContext(
@@ -352,7 +346,6 @@ def test_clear_command_rebinds_session_scoped_services(tmp_path: Path) -> None:
         compaction_service=compaction,  # type: ignore[arg-type]
         current_model_context=current_context,
         subagent_runner=subagent_runner,  # type: ignore[arg-type]
-        session_memory_store=old_memory_store,
     )
 
     result, _output = run_command(runtime, "/clear")
@@ -364,7 +357,6 @@ def test_clear_command_rebinds_session_scoped_services(tmp_path: Path) -> None:
     assert executor.result_store is not None
     assert str(cleared.state.session_id) in str(executor.result_store.results_dir)
     assert compaction.bound_message_store is cleared.message_store
-    assert compaction.bound_session_memory_store is not old_memory_store
     assert compaction.bound_result_store is executor.result_store
     assert subagent_runner.parent_message_store is cleared.message_store
     assert cleared.loop.message_store is cleared.message_store
@@ -405,7 +397,7 @@ def test_tasks_command_renders_existing_tasks(tmp_path: Path) -> None:
 
     assert "Durable tasks" in output
     assert "task list: session-cli" in output
-    assert ".onecode" in output
+    assert ".nervure" in output
     assert "#1" in output
     assert "pending" in output
     assert "Schema" in output
@@ -546,16 +538,14 @@ def test_permissions_command_requires_project_store(tmp_path: Path) -> None:
     assert "Project permission settings are not enabled" in output
 
 
-def test_memory_command_renders_session_and_long_term_state(tmp_path: Path) -> None:
-    runtime = replace(
-        make_runtime(tmp_path),
-        session_memory_store=SessionMemoryStore(session_dir(tmp_path, "session-cli")),
-    )
+def test_memory_command_renders_long_term_state(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
 
     _result, output = run_command(runtime, "/memory")
 
     assert "Memory" in output
-    assert "session-memory.md" in output
+    assert "long-term memory dir" in output
+    assert "session-memory.md" not in output
 
 
 def test_exit_command_flushes_and_exits(tmp_path: Path) -> None:

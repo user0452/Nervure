@@ -72,7 +72,13 @@ class FileStateCache:
         return state
 
     def changed_text_files(self) -> tuple[ChangedTextFile, ...]:
-        """Compare cached mtimes with disk and return bounded diffs."""
+        """Compare cached text with disk and return bounded diffs.
+
+        ``st_mtime_ns`` remains useful metadata, but it is not a reliable
+        change detector on Windows and mounted workspaces: rapid same-size
+        edits can retain the same timestamp. Comparing the decoded text
+        directly removes that timestamp-granularity flake without sleeps.
+        """
 
         changed: list[ChangedTextFile] = []
         for path, cached in list(self._states.items()):
@@ -83,16 +89,15 @@ class FileStateCache:
                 continue
             try:
                 current_mtime = path.stat().st_mtime_ns
-            except OSError:
-                continue
-            if current_mtime == cached.mtime_ns:
-                continue
-            try:
                 current = read_text_file(path)
             except OSError:
                 continue
-            self.snapshot_path(path, partial=False)
+            if current == cached.content:
+                cached.mtime_ns = current_mtime
+                continue
             diff = _diff_snippet(cached.content, current)
+            cached.content = current
+            cached.mtime_ns = current_mtime
             if diff:
                 changed.append(ChangedTextFile(path=path, diff=diff))
         return tuple(changed)

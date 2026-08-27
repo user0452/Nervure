@@ -1,6 +1,6 @@
 """Plan-mode services: file store, transitions, prompts, and attachments.
 
-The plan store owns ``.onecode/plans/`` markdown files. Plan state itself lives
+The plan store owns ``.nervure/plans/`` markdown files and can resume legacy ``.onecode/plans/`` files. Plan state itself lives
 on ``core.runtime_state.RuntimeState.plan``; this package is a pure filesystem
 and prompt layer so it can be tested without a running runtime.
 """

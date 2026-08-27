@@ -43,7 +43,7 @@ from services.tools.types import (
 def test_plan_store_creates_layout(tmp_path: Path) -> None:
     store = PlanStore(tmp_path)
     plan_dir = store.ensure_layout()
-    assert plan_dir == tmp_path / ".onecode" / "plans"
+    assert plan_dir == tmp_path / ".nervure" / "plans"
     assert plan_dir.is_dir()
     # Idempotent.
     assert store.ensure_layout() == plan_dir
@@ -53,7 +53,7 @@ def test_plan_store_allocates_session_slug(tmp_path: Path) -> None:
     state = RuntimeState()
     store = PlanStore(tmp_path)
     plan_file = store.get_or_create_plan(state)
-    assert plan_file.path == tmp_path / ".onecode" / "plans" / f"{state.session_id}.md"
+    assert plan_file.path == tmp_path / ".nervure" / "plans" / f"{state.session_id}.md"
     assert state.plan.plan_slug == state.session_id
 
 
@@ -62,7 +62,7 @@ def test_plan_store_reuses_existing_slug(tmp_path: Path) -> None:
     state.plan.plan_slug = "demo"
     store = PlanStore(tmp_path)
     plan_file = store.get_or_create_plan(state)
-    assert plan_file.path == tmp_path / ".onecode" / "plans" / "demo.md"
+    assert plan_file.path == tmp_path / ".nervure" / "plans" / "demo.md"
 
 
 def test_plan_store_fork_creates_independent_copy(tmp_path: Path) -> None:
@@ -451,7 +451,7 @@ def test_cli_plan_command_enters_plan_mode(tmp_path: Path) -> None:
 
     output = render_to_text(result.renderable)
     assert "Enabled plan mode" in output
-    plan_path = tmp_path / ".onecode" / "plans" / f"{runtime.state.session_id}.md"
+    plan_path = tmp_path / ".nervure" / "plans" / f"{runtime.state.session_id}.md"
     assert plan_path.parent.is_dir()
 
 
@@ -476,7 +476,7 @@ def test_cli_plan_command_open_prints_path(tmp_path: Path) -> None:
     buffer = StringIO()
     Console(file=buffer, force_terminal=False, width=200).print(payload)
     output = buffer.getvalue()
-    assert ".onecode" in output and "plans" in output
+    assert ".nervure" in output and "plans" in output
 
 
 def test_cli_plan_command_show_displays_content(tmp_path: Path) -> None:

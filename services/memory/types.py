@@ -1,4 +1,4 @@
-"""Types for OneCode long-term memory."""
+"""Types for Nervure long-term memory."""
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ class InstructionMemoryResult:
     rendered_text: str
     fingerprint: str
     warnings: tuple[str, ...] = ()
+    token_count: int = 0
+    truncated: bool = False
 
 
 @dataclass(frozen=True)

@@ -27,7 +27,7 @@ class StatusSymbols:
 
 SYMBOLS = StatusSymbols()
 
-# 启动横幅左侧的吉祥物字符画（紧凑三行小猫），用 onecode.mascot 样式着色。
+# 启动横幅左侧的吉祥物字符画（紧凑三行小猫），用 nervure.mascot 样式着色。
 MASCOT_CAT = r"""
  /\_/\
 ( o.o )
@@ -44,21 +44,21 @@ def _base_palette() -> dict[str, str]:
     """
 
     return {
-        "onecode.title": "bold cyan",
-        "onecode.accent": "cyan",
-        "onecode.mascot": "bold yellow",
-        "onecode.subtle": "dim",
-        "onecode.dim": "dim",
-        "onecode.command": "bold magenta",
-        "onecode.path": "cyan",
-        "onecode.success": "green",
-        "onecode.error": "bold red",
-        "onecode.warning": "yellow",
-        "onecode.info": "blue",
-        "onecode.permission": "yellow",
-        "onecode.model": "green",
-        "onecode.session": "magenta",
-        "onecode.metric": "bold",
+        "nervure.title": "bold cyan",
+        "nervure.accent": "cyan",
+        "nervure.mascot": "bold yellow",
+        "nervure.subtle": "dim",
+        "nervure.dim": "dim",
+        "nervure.command": "bold magenta",
+        "nervure.path": "cyan",
+        "nervure.success": "green",
+        "nervure.error": "bold red",
+        "nervure.warning": "yellow",
+        "nervure.info": "blue",
+        "nervure.permission": "yellow",
+        "nervure.model": "green",
+        "nervure.session": "magenta",
+        "nervure.metric": "bold",
         # Rich Table / Markdown table renderables reference these
         # default styles by name. Keep them foreground-only so CLI
         # output still inherits the terminal host background.
@@ -80,9 +80,9 @@ RICH_THEME = Theme(_base_palette(), inherit=False)
 RICH_THEME_DARK = Theme(_base_palette(), inherit=False)
 
 _RICH_THEME_LIGHT_PALETTE = _base_palette() | {
-    "onecode.subtle": "grey50",
-    "onecode.mascot": "dark_orange3",
-    "onecode.path": "dark_cyan",
+    "nervure.subtle": "grey50",
+    "nervure.mascot": "dark_orange3",
+    "nervure.path": "dark_cyan",
 }
 RICH_THEME_LIGHT = Theme(_RICH_THEME_LIGHT_PALETTE, inherit=False)
 

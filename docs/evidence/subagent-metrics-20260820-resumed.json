@@ -1,0 +1,87 @@
+{
+  "schema_version": 2,
+  "evaluation_status": "complete_with_phase2",
+  "output_dir": "C:\\Users\\刘\\Desktop\\Nervure-Traces\\subagent-evaluation-resumed-20260820-103205",
+  "repository": {
+    "revision": "f0e9cec8ae103049efdb57ca082960f242d58c1f",
+    "dirty": true,
+    "relevant_tree_sha256": "0583befebbeb4073a654a75c3fcf9ad3cb94cdf439b9ffc34855d7cc43615bc5"
+  },
+  "harbor": {
+    "version": "0.21.0",
+    "commit": "64afbbcb62165950301e1a6407c729aa26d844ff"
+  },
+  "provider": {
+    "provider": "custom",
+    "model": "mimo-v2.5-pro-1m",
+    "health_gate": "2/2 consecutive success"
+  },
+  "dataset": {
+    "name": "nervure-medium-coding",
+    "case_count": 8,
+    "current_validate_dataset": "PASS",
+    "buggy_fixture_fail": "8/8",
+    "oracle_pass": "8/8",
+    "hidden_verifier_isolated": true,
+    "instruction_leak": false
+  },
+  "phase1": {
+    "planned_order": [
+      "A_OFF_r1",
+      "B_ON_r1",
+      "B_ON_r2",
+      "A_OFF_r2"
+    ],
+    "concurrency": 4,
+    "primary_target_trials": 32,
+    "infrastructure_rerun_attempts": 11,
+    "effective_valid_trials": 27,
+    "matched_pairs": 12,
+    "phase1_infrastructure_error_attempts": 13,
+    "operational_timeout_attempts": 3,
+    "unresolved_targets": 2,
+    "variants": {
+      "A_OFF": {
+        "effective_valid": 12,
+        "correctness_pass": 12,
+        "natural_adoption": 0
+      },
+      "B_ON": {
+        "effective_valid": 15,
+        "correctness_pass": 14,
+        "natural_adoption": 7,
+        "natural_adoption_rate": 0.4666666666666667
+      }
+    },
+    "usage_effective": {
+      "A_OFF_total_model_calls": 165,
+      "B_ON_total_model_calls": 234,
+      "A_OFF_total_input_tokens": 1916235,
+      "B_ON_total_input_tokens": 2535433
+    }
+  },
+  "phase2": {
+    "trials": 4,
+    "valid": 3,
+    "infrastructure_error": 1,
+    "natural_adoption": 1,
+    "multi_explore": 0,
+    "result": "multi-subagent natural adoption insufficient"
+  },
+  "tests": {
+    "pytest": "751 passed in 19.80s",
+    "compileall": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "confidence": {
+    "adoption": "MEDIUM",
+    "correctness": "LOW/MEDIUM",
+    "total_cost": "LOW/MEDIUM",
+    "latency": "LOW"
+  },
+  "notes": [
+    "Raw Harbor jobs/traces/artifacts are preserved in the desktop output directory.",
+    "No source/runtime/prompt/task/verifier changes were made during formal trials.",
+    "Use desktop final-metrics.json and paired-analysis.json for complete scope-separated usage and matched-pair metrics."
+  ]
+}

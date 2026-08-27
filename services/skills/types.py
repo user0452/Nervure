@@ -1,4 +1,4 @@
-"""Domain types for OneCode skill loading."""
+"""Domain types for Nervure skill loading."""
 
 from __future__ import annotations
 

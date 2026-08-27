@@ -1,4 +1,4 @@
-"""Load layered OneCode instruction memory files."""
+"""Load layered Nervure instruction memory files."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class _LoadRoot:
 
 
 class InstructionMemoryLoader:
-    """Load ONECODE.md, rules, local overrides, and @include references."""
+    """Load NERVURE.md (with legacy ONECODE.md fallback), rules, local overrides, and @include references."""
 
     def __init__(
         self,
@@ -40,11 +40,19 @@ class InstructionMemoryLoader:
         *,
         home: Path | str | None = None,
         trace_recorder: TraceRecorder | None = None,
+        max_tokens: int = 8_000,
     ) -> None:
         self.workspace = resolve_path(Path(workspace))
         self.home = resolve_path(Path(home).expanduser()) if home is not None else Path.home().resolve()
-        self.onecode_home = self.home / ".onecode"
+        self.nervure_home = self.home / ".nervure"
+        self.legacy_home = self.home / ".onecode"
+        self.instruction_home = (
+            self.nervure_home
+            if self.nervure_home.exists() or not self.legacy_home.exists()
+            else self.legacy_home
+        )
         self.trace_recorder = trace_recorder or TraceRecorder.noop()
+        self.max_tokens = max(0, max_tokens)
 
     def load(
         self,
@@ -75,7 +83,8 @@ class InstructionMemoryLoader:
             if file is not None:
                 loaded.append(file)
         rendered = "\n\n".join(_format_file(file) for file in loaded if file.content.strip())
-        return InstructionMemoryResult(
+        rendered, token_count, truncated = _apply_token_budget(rendered, self.max_tokens)
+        result = InstructionMemoryResult(
             files=tuple(loaded),
             rendered_text=rendered,
             fingerprint=_fingerprint(
@@ -83,7 +92,20 @@ class InstructionMemoryLoader:
                 "|".join(target_texts),
             ),
             warnings=tuple(warnings),
+            token_count=token_count,
+            truncated=truncated,
         )
+        self.trace_recorder.event(
+            "project_instructions_loaded",
+            {
+                "loaded_rule_count": len(result.files),
+                "source_paths": tuple(str(file.path) for file in result.files),
+                "token_count": result.token_count,
+                "truncated": result.truncated,
+                "warnings": len(result.warnings),
+            },
+        )
+        return result
 
     def _candidate_roots(self, cwd: Path) -> tuple[_LoadRoot, ...]:
         roots: list[_LoadRoot] = []
@@ -93,7 +115,18 @@ class InstructionMemoryLoader:
                 _LoadRoot(
                     "project",
                     self.workspace,
-                    directory / "ONECODE.md",
+                    _preferred_instruction_path(directory, "NERVURE.md", "ONECODE.md"),
+                    rule_base_dir=directory,
+                )
+            )
+            # ``.nervure/instructions.md`` is the project-level entrypoint.
+            # Keep NERVURE.md/ONECODE.md as a compatibility layer rather than
+            # forcing projects to migrate their existing guidance files.
+            roots.append(
+                _LoadRoot(
+                    "project",
+                    self.workspace,
+                    _instruction_state_dir(directory) / "instructions.md",
                     rule_base_dir=directory,
                 )
             )
@@ -101,11 +134,11 @@ class InstructionMemoryLoader:
                 _LoadRoot(
                     "project",
                     self.workspace,
-                    directory / ".onecode" / "ONECODE.md",
+                    _preferred_instruction_path(_instruction_state_dir(directory), "NERVURE.md", "ONECODE.md"),
                     rule_base_dir=directory,
                 )
             )
-            for path in sorted((directory / ".onecode" / "rules").glob("*.md")):
+            for path in sorted((_instruction_state_dir(directory) / "rules").glob("*.md")):
                 roots.append(
                     _LoadRoot(
                         "project",
@@ -119,18 +152,24 @@ class InstructionMemoryLoader:
                 _LoadRoot(
                     "local",
                     self.workspace,
-                    directory / "ONECODE.local.md",
+                    _preferred_instruction_path(directory, "NERVURE.local.md", "ONECODE.local.md"),
                     rule_base_dir=directory,
                 )
             )
         return tuple(roots)
 
     def _user_roots(self) -> list[_LoadRoot]:
-        roots = [_LoadRoot("user", self.onecode_home, self.onecode_home / "ONECODE.md")]
-        rules_dir = self.onecode_home / "rules"
+        roots = [
+            _LoadRoot(
+                "user",
+                self.instruction_home,
+                _preferred_instruction_path(self.instruction_home, "NERVURE.md", "ONECODE.md"),
+            )
+        ]
+        rules_dir = self.instruction_home / "rules"
         if rules_dir.exists():
             roots.extend(
-                _LoadRoot("user", self.onecode_home, path, rule_base_dir=self.workspace)
+                _LoadRoot("user", self.instruction_home, path, rule_base_dir=self.workspace)
                 for path in sorted(rules_dir.glob("*.md"))
             )
         return roots
@@ -242,6 +281,21 @@ def _workspace_chain(workspace: Path, cwd: Path) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(directories))
 
 
+def _instruction_state_dir(directory: Path) -> Path:
+    primary = directory / ".nervure"
+    legacy = directory / ".onecode"
+    if primary.exists() or not legacy.exists():
+        return primary
+    return legacy
+
+
+def _preferred_instruction_path(directory: Path, primary: str, legacy: str) -> Path:
+    primary_path = directory / primary
+    if primary_path.exists():
+        return primary_path
+    return directory / legacy
+
+
 def _clamp_to_workspace(path: Path, workspace: Path) -> Path:
     return path if _is_inside(path, workspace) else workspace
 
@@ -319,3 +373,22 @@ def _glob_matches(value: str, pattern: str) -> bool:
 
 def _fingerprint(*parts: str) -> str:
     return sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def _apply_token_budget(text: str, max_tokens: int) -> tuple[str, int, bool]:
+    """Apply a deterministic conservative token budget without a model tokenizer.
+
+    Four characters per token is deliberately approximate, but stable across
+    providers and sufficient for a project-instruction guardrail. The actual
+    provider usage remains the source of billing truth.
+    """
+
+    estimated = (len(text) + 3) // 4
+    if max_tokens <= 0 or estimated <= max_tokens:
+        return text, estimated, False
+    limit = max_tokens * 4
+    suffix = "\n\n[Project instructions truncated at configured token budget.]"
+    if len(suffix) > limit:
+        suffix = "[truncated]"[:limit]
+    bounded = text[: max(0, limit - len(suffix))].rstrip() + suffix
+    return bounded, (len(bounded) + 3) // 4, True

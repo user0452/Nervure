@@ -1,11 +1,11 @@
 [project]
-name = "onecode"
+name = "nervure"
 version = "0.1.0"
 description = "A code agent runtime."
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28.1",
-    "mcp>=1.27.2",
+    "mcp>=1.28.1,<2",
     "pydantic>=2.0",
     "rich>=13.7.0",
     "python-dotenv>=1.0.1",
@@ -13,6 +13,22 @@ dependencies = [
     "tree-sitter-bash",
     "prompt-toolkit>=3.0.52",
 ]
+
+[project.optional-dependencies]
+eval = [
+    "harbor==0.21.0; python_version >= '3.12'",
+]
+
+[project.scripts]
+nervure-eval = "evals.cli:main"
+
+[tool.setuptools.packages.find]
+# Discover every conventional Python package in the checkout.  Namespace
+# discovery is disabled deliberately so task fixtures are not packaged merely
+# because a nested fixture directory happens to contain an __init__.py.
+include = ["*"]
+exclude = ["tests*", "work*", "outputs*", "docs*"]
+namespaces = false
 
 [dependency-groups]
 dev = [

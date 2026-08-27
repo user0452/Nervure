@@ -92,6 +92,29 @@ def test_chat_completions_streams_text_deltas_and_final_message() -> None:
     assert transport.calls[0][2]["stream"] is True
 
 
+def test_chat_completions_preserves_provider_reasoning_text_when_exposed() -> None:
+    transport = FakeAsyncTransport(
+        [
+            {"choices": [{"delta": {"reasoning_content": "check context"}}]},
+            {"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]},
+        ]
+    )
+    client = OpenAICompatibleChatCompletionsClient(
+        resolved_config(),
+        async_transport=transport,
+    )
+
+    async def run() -> list:
+        return [event async for event in client.stream(ContextSnapshot("", ()))]
+
+    events = asyncio.run(run())
+
+    assert [event.text for event in events if event.type == "reasoning_delta"] == [
+        "check context"
+    ]
+    assert events[-1].reasoning_text == "check context"
+
+
 def test_chat_completions_marks_length_finish_as_output_interrupted() -> None:
     transport = FakeAsyncTransport(
         [

@@ -12,9 +12,9 @@ def test_instruction_loader_layers_includes_comments_and_conditional_rules(tmp_p
     (home / ".onecode" / "rules").mkdir(parents=True)
     (workspace / ".onecode" / "rules").mkdir(parents=True)
 
-    (home / ".onecode" / "ONECODE.md").write_text("user base", encoding="utf-8")
+    (home / ".onecode" / "NERVURE.md").write_text("user base", encoding="utf-8")
     (workspace / "included.md").write_text("included text", encoding="utf-8")
-    (workspace / "ONECODE.md").write_text(
+    (workspace / "NERVURE.md").write_text(
         "@./included.md\nproject <!-- hidden --> base",
         encoding="utf-8",
     )
@@ -26,7 +26,7 @@ def test_instruction_loader_layers_includes_comments_and_conditional_rules(tmp_p
         "---\npaths: docs/*.md\n---\ndocs rule",
         encoding="utf-8",
     )
-    (workspace / "ONECODE.local.md").write_text("local override", encoding="utf-8")
+    (workspace / "NERVURE.local.md").write_text("local override", encoding="utf-8")
 
     state = RuntimeState()
     state.metadata["files_read"] = {str(src / "app.py")}

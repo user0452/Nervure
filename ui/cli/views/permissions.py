@@ -15,26 +15,30 @@ from ui.cli.views.common import display_path, preview, titled_section
 
 
 def render_permissions(runtime: CliRuntime) -> Group:
+    active_mode = runtime.state.permission_mode.value
+    if runtime.state.is_plan_mode() and runtime.state.plan.pre_plan_mode is not None:
+        active_mode = f"plan (return to {runtime.state.plan.pre_plan_mode.value})"
+    mode = Text(f"mode: {active_mode}", style="nervure.permission")
     session = _session_table(runtime)
     project = _project_table(runtime)
     hint = Text(
-        "edit: /permissions add|remove|replace allow|deny|ask <rule>",
-        style="onecode.subtle",
+        "mode: /permissions mode normal|full · edit: /permissions add|remove|replace allow|deny|ask <rule>",
+        style="nervure.subtle",
     )
     return titled_section(
         "Permissions",
-        Group(session, Text(), project, Text(), hint),
-        style="onecode.permission",
+        Group(mode, Text(), session, Text(), project, Text(), hint),
+        style="nervure.permission",
     )
 
 
 def _session_table(runtime: CliRuntime) -> object:
     store = runtime.permission_store
     if store is None:
-        return Text(f"{SYMBOLS.info} Session permissions: disabled", style="onecode.subtle")
+        return Text(f"{SYMBOLS.info} Session permissions: disabled", style="nervure.subtle")
     snapshot = store.snapshot()
     table = Table(title="Session", box=None, show_header=False)
-    table.add_column("field", style="onecode.subtle")
+    table.add_column("field", style="nervure.subtle")
     table.add_column("value")
     table.add_row("allowed directories", str(len(snapshot.allowed_directories)))
     if snapshot.allowed_directories:
@@ -55,9 +59,9 @@ def _project_table(runtime: CliRuntime) -> object:
     policy = runtime.permission_policy
     project_store = policy.project_store if policy is not None else None
     if project_store is None:
-        return Text(f"{SYMBOLS.info} Project permissions: disabled", style="onecode.subtle")
+        return Text(f"{SYMBOLS.info} Project permissions: disabled", style="nervure.subtle")
     table = Table(title="Project", box=None, show_header=False)
-    table.add_column("field", style="onecode.subtle")
+    table.add_column("field", style="nervure.subtle")
     table.add_column("value")
     table.add_row("settings", display_path(project_store.settings_path, runtime.workspace))
     try:

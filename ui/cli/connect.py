@@ -10,7 +10,8 @@ import re
 from infrastructure.config.env import provider_env_prefix
 from infrastructure.providers.connection import ConnectOption, ProviderConnectionService
 
-ACTIVE_PROVIDER_KEY = "ONECODE_PROVIDER_ID"
+ACTIVE_PROVIDER_KEY = "NERVURE_PROVIDER_ID"
+LEGACY_ACTIVE_PROVIDER_KEY = "ONECODE_PROVIDER_ID"
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def write_provider_env(env_path: Path, update: ProviderEnvUpdate) -> None:
     provider_comment_index: int | None = None
     for line in lines:
         key = _line_key(line)
-        if key == ACTIVE_PROVIDER_KEY:
+        if key in {ACTIVE_PROVIDER_KEY, LEGACY_ACTIVE_PROVIDER_KEY}:
             output.append(f"{ACTIVE_PROVIDER_KEY}={_format_env_value(update.provider_id)}")
             active_seen = True
             continue
@@ -127,7 +128,9 @@ def has_provider_config(env_path: Path) -> bool:
     """Return ``True`` when ``.env`` has the active provider block configured."""
 
     existing = read_existing_env(env_path)
-    provider_id = existing.get(ACTIVE_PROVIDER_KEY)
+    provider_id = existing.get(ACTIVE_PROVIDER_KEY) or existing.get(
+        LEGACY_ACTIVE_PROVIDER_KEY
+    )
     if not provider_id:
         return False
     prefix = provider_env_prefix(provider_id)

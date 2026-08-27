@@ -229,7 +229,7 @@ def _extraction_prompt(
     )
     return "\n".join(
         [
-            "Update workspace-local OneCode long-term memory if the new conversation contains durable future-useful facts.",
+            "Update workspace-local Nervure long-term memory if the new conversation contains durable future-useful facts.",
             "",
             f"Memory directory: {store.memory_dir.resolve()}",
             f"Index file: {store.entrypoint_path.resolve()}",

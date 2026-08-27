@@ -40,7 +40,7 @@ def descriptor(plan_store: "PlanStore") -> ToolDescriptor:
         name="enter_plan_mode",
         description=(
             "Switch the runtime into plan mode. The agent becomes read-only "
-            "except for writing the plan file at .onecode/plans/<slug>.md."
+            "except for writing the plan file at .nervure/plans/<slug>.md."
         ),
         input_schema=INPUT_SCHEMA,
         handler=_handle_for(plan_store),

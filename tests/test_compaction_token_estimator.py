@@ -8,6 +8,7 @@ from services.compaction.token_estimator import (
     estimate_messages_tokens,
     estimate_snapshot_tokens,
 )
+from services.compaction.types import CompactionConfig
 from services.context.snapshot import ContextSnapshot
 
 
@@ -62,3 +63,27 @@ def test_estimates_message_chain_and_snapshot() -> None:
 
     assert estimate_messages_tokens(messages) > 0
     assert estimate_snapshot_tokens(snapshot) > estimate_messages_tokens(messages)
+
+
+def test_compaction_budgets_are_derived_from_context_window_ratios() -> None:
+    config = CompactionConfig(context_window_tokens=200_000)
+
+    assert config.compact_trigger_tokens == 160_000
+    assert config.compact_summary_reserve_tokens == 20_000
+    assert config.compact_safety_buffer_tokens == 10_000
+    assert config.recent_tail_budget_tokens == 16_000
+    assert config.auto_compact_threshold_tokens == config.compact_trigger_tokens
+
+
+def test_compaction_ratio_validation_rejects_unsafe_configuration() -> None:
+    for kwargs in (
+        {"context_window_tokens": 0},
+        {"compact_trigger_ratio": 1.0},
+        {"compact_trigger_ratio": 0.9, "compact_summary_reserve_ratio": 0.1, "compact_safety_buffer_ratio": 0.1},
+        {"recent_tail_min_tokens": 2, "recent_tail_max_tokens": 1},
+    ):
+        try:
+            CompactionConfig(**kwargs)
+        except ValueError:
+            continue
+        raise AssertionError(f"invalid compaction config accepted: {kwargs}")

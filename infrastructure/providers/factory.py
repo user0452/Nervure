@@ -10,16 +10,21 @@ from infrastructure.providers.http import AsyncHttpTransport, HttpTransport
 from infrastructure.providers.model_catalog import ModelCatalogClient
 
 
-def resolve_config(env_path: str | Path = ".env") -> ResolvedProviderConfig:
-    return load_provider_config(env_path)
+def resolve_config(
+    env_path: str | Path = ".env",
+    *,
+    allow_process_env: bool = False,
+) -> ResolvedProviderConfig:
+    return load_provider_config(env_path, allow_process_env=allow_process_env)
 
 
 def create_model_client(
     env_path: str | Path = ".env",
     *,
     async_transport: AsyncHttpTransport | None = None,
+    allow_process_env: bool = False,
 ) -> OpenAICompatibleChatCompletionsClient:
-    resolved = load_provider_config(env_path)
+    resolved = load_provider_config(env_path, allow_process_env=allow_process_env)
     return OpenAICompatibleChatCompletionsClient(
         resolved,
         async_transport=async_transport,

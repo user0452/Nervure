@@ -27,7 +27,7 @@ def test_create_get_list_uses_highwatermark_and_camel_case_json(tmp_path: Path) 
 
     assert first.id == "1"
     assert second.id == "2"
-    assert (tmp_path / ".onecode" / "tasks" / "list-a" / ".highwatermark").read_text(
+    assert (tmp_path / ".nervure" / "tasks" / "list-a" / ".highwatermark").read_text(
         encoding="utf-8"
     ) == "2"
     payload = json.loads(store.task_path("list-a", "2").read_text(encoding="utf-8"))

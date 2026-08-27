@@ -31,6 +31,8 @@ rather than silently rewinding text the user has already seen.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable
+import hashlib
+import json
 from typing import Any, Protocol
 
 from core.context_engine import ContextEngine
@@ -39,6 +41,7 @@ from core.stream_events import AgentEvent, mint_assistant_call_id
 from core.transitions import TransitionReason
 from services.context.message_store import MessageStore
 from services.context.current_model_context import CurrentModelContext
+from services.compaction.token_estimator import estimate_snapshot_tokens
 from services.hooks import HookEvent, HookRegistry
 from services.model.client import ModelClient
 from services.model.retry import ModelRetryRunner, RetryDecision
@@ -67,26 +70,96 @@ class ReactiveCompactor(Protocol):
         ...
 
 
-class SessionMemoryUpdaterProtocol(Protocol):
-    async def update_after_turn(
-        self,
-        messages: tuple[dict[str, Any], ...],
-        state: RuntimeState,
-    ) -> None:
-        ...
+def _context_trace_attributes(
+    snapshot: Any,
+    message_store: MessageStore,
+    state: RuntimeState,
+) -> dict[str, Any]:
+    """Record context identity and shape without dumping its contents."""
+
+    compact = state.metadata.get("last_compaction")
+    compact_attributes = compact if isinstance(compact, dict) else {}
+    return {
+        "message_count": len(snapshot.messages),
+        "tool_schema_count": len(snapshot.tool_schemas),
+        "has_system_prompt": bool(snapshot.system_prompt),
+        "system_prompt_hash": _stable_hash(snapshot.system_prompt),
+        "tool_schema_hash": _stable_hash(snapshot.tool_schemas),
+        "message_ids": tuple(
+            item.get("message_id")
+            for item in message_store.current_message_trace_metadata()
+        ),
+        "message_roles": tuple(
+            message.get("role") for message in snapshot.messages
+        ),
+        "selected_memory_paths": tuple(
+            _selected_memory_paths(snapshot.messages)
+        ),
+        "estimated_tokens": estimate_snapshot_tokens(snapshot),
+        "compact_boundary_id": compact_attributes.get("boundary_id"),
+        "compact_summary_identity": _compact_summary_identity(snapshot.messages),
+    }
 
 
-class SessionMemoryExtractorProtocol(Protocol):
-    async def maybe_extract_after_model_response(
-        self,
-        messages: tuple[dict[str, Any], ...],
-        state: RuntimeState,
-        *,
-        assistant_message: dict[str, Any],
-        tool_calls: tuple[Any, ...],
-        usage: Any | None = None,
-    ) -> None:
-        ...
+def _selected_memory_paths(messages: tuple[dict[str, Any], ...]) -> list[str]:
+    paths: list[str] = []
+    for message in messages:
+        attachment = message.get("attachment")
+        if not isinstance(attachment, dict):
+            continue
+        if attachment.get("type") != "relevant_memories":
+            continue
+        path = attachment.get("path")
+        if isinstance(path, str) and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _compact_summary_identity(messages: tuple[dict[str, Any], ...]) -> str | None:
+    identities = []
+    for message in messages:
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("is_compact_summary") is True:
+            identity = metadata.get("compact_boundary_id")
+            if isinstance(identity, str):
+                identities.append(identity)
+    return identities[-1] if identities else None
+
+
+def _stable_hash(value: Any) -> str:
+    try:
+        rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        rendered = repr(value)
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()[:16]
+
+
+def _debug_model_completion_attributes(event: ModelStreamEvent) -> dict[str, Any]:
+    usage = event.usage
+    attributes: dict[str, Any] = {
+        "assistant_visible_text": event.final_text,
+        "tool_calls": tuple(
+            {
+                "tool_name": call.name,
+                "tool_call_id": call.id,
+                "arguments": dict(call.input),
+            }
+            for call in event.metadata.get("tool_calls", ())
+            if hasattr(call, "name") and hasattr(call, "id")
+        ),
+    }
+    if event.reasoning_text:
+        attributes["provider_reasoning_text"] = event.reasoning_text
+        attributes["reasoning_text_status"] = "available"
+    elif usage is not None and usage.reasoning_tokens is not None:
+        attributes["reasoning_text_status"] = "not_returned"
+    else:
+        attributes["reasoning_text_status"] = "adapter_unavailable"
+    if usage is not None and usage.reasoning_tokens is not None:
+        attributes["reasoning_tokens"] = usage.reasoning_tokens
+    return attributes
 
 
 class AgentLoop:
@@ -102,8 +175,6 @@ class AgentLoop:
         current_model_context: CurrentModelContext | None = None,
         hooks: HookRegistry | None = None,
         compaction_service: ReactiveCompactor | None = None,
-        session_memory_extractor: SessionMemoryExtractorProtocol | None = None,
-        session_memory_updater: SessionMemoryUpdaterProtocol | None = None,
         model_retry_runner: ModelRetryRunner | None = None,
         error_log_recorder: ErrorLogRecorder | None = None,
     ) -> None:
@@ -126,8 +197,6 @@ class AgentLoop:
         self.current_model_context = current_model_context
         self.hooks = hooks or HookRegistry()
         self.compaction_service = compaction_service
-        self.session_memory_extractor = session_memory_extractor
-        self.session_memory_updater = session_memory_updater
 
     async def stream(
         self,
@@ -135,16 +204,26 @@ class AgentLoop:
         *,
         attachments: Iterable[dict[str, Any]] | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        with self.trace_recorder.span(
-            "interaction",
-            {"user_prompt_length": len(prompt)},
+        if (
+            self.state.interaction is not None
+            and self.state.interaction.kind.value in {"plan_review", "user_interrupt"}
         ):
+            self.state.resume()
+        user_turn_id = self.state.begin_user_turn()
+        interaction_attributes = {
+            "user_prompt_length": len(prompt),
+            "user_turn_id": user_turn_id,
+        }
+        if self.trace_recorder.is_debug:
+            interaction_attributes["user_prompt"] = prompt
+        with self.trace_recorder.span("interaction", interaction_attributes):
             await self.hooks.run(
                 HookEvent.USER_PROMPT_SUBMIT,
                 {
                     "prompt_length": len(prompt),
                     "session_id": self.state.session_id,
                     "turn_count": self.state.turn_count,
+                    "user_turn_id": user_turn_id,
                 },
             )
             self.message_store.append_user(prompt)
@@ -157,9 +236,13 @@ class AgentLoop:
     async def continue_stream(self) -> AsyncIterator[AgentEvent]:
         """Continue from messages already seeded into the message store."""
 
+        user_turn_id = self.state.begin_user_turn()
         with self.trace_recorder.span(
             "interaction",
-            {"continued_from_seeded_messages": True},
+            {
+                "continued_from_seeded_messages": True,
+                "user_turn_id": user_turn_id,
+            },
         ):
             yield AgentEvent(type="interaction_started")
             async for event in self._run_loop_async():
@@ -214,14 +297,17 @@ class AgentLoop:
                     self.current_model_context.snapshot = snapshot
                 context_span.end(
                     {
-                        "message_count": len(snapshot.messages),
-                        "tool_schema_count": len(snapshot.tool_schemas),
-                        "has_system_prompt": bool(snapshot.system_prompt),
+                        **_context_trace_attributes(
+                            snapshot,
+                            self.message_store,
+                            self.state,
+                        ),
                     }
                 )
 
             model_attributes = self._model_attributes()
             model_attributes["turn_count"] = self.state.turn_count
+            model_attributes["user_turn_id"] = getattr(self.state, "user_turn_id", None)
             # Local state used to drive post-attempt logic. The streaming
             # model events themselves are NOT collected here — we forward
             # them to the caller live.
@@ -293,6 +379,7 @@ class AgentLoop:
                             yield AgentEvent(
                                 type="tool_call_ready",
                                 metadata={
+                                    **getattr(model_event, "metadata", {}),
                                     "model_turn_index": model_turn_index,
                                     "assistant_call_id": assistant_call_id,
                                     "tool_call": model_event.tool_call,
@@ -312,6 +399,7 @@ class AgentLoop:
                             completed_message = model_event
                             completed_tool_calls = self._event_tool_calls(model_event)
                             end_attributes = {
+                                **model_attributes,
                                 "tool_call_count": len(completed_tool_calls),
                                 "stop_reason": model_event.stop_reason,
                                 "output_interrupted": model_event.output_interrupted,
@@ -327,7 +415,24 @@ class AgentLoop:
                                         "cache_creation_input_tokens": (
                                             model_event.usage.cache_creation_input_tokens
                                         ),
+                                        "uncached_input_tokens": max(
+                                            0,
+                                            model_event.usage.input_tokens
+                                            - model_event.usage.cache_read_input_tokens,
+                                        ),
                                     }
+                                )
+                                if model_event.usage.reasoning_tokens is not None:
+                                    end_attributes["reasoning_tokens"] = (
+                                        model_event.usage.reasoning_tokens
+                                    )
+                                if model_event.usage.visible_output_tokens is not None:
+                                    end_attributes["visible_output_tokens"] = (
+                                        model_event.usage.visible_output_tokens
+                                    )
+                            if self.trace_recorder.is_debug:
+                                end_attributes.update(
+                                    _debug_model_completion_attributes(model_event)
                                 )
                             model_span.end(end_attributes)
                             # Now that the attempt is complete, surface
@@ -342,6 +447,7 @@ class AgentLoop:
                         "status_code": exc.status_code,
                         "error_type": exc.error_type,
                         "retryable": exc.retryable,
+                        **exc.metadata,
                     },
                 )
                 if await self._try_reactive_compact(exc):
@@ -441,6 +547,14 @@ class AgentLoop:
                 )
                 if followup_messages:
                     self.message_store.append_attachments(followup_messages)
+                if self.state.is_suspended():
+                    interaction = self.state.interaction
+                    assert interaction is not None
+                    yield AgentEvent(
+                        type="suspended",
+                        metadata={"interaction_kind": interaction.kind.value},
+                    )
+                    return
                 self.state.set_transition(TransitionReason.TOOL_USE)
                 self._record_transition(TransitionReason.TOOL_USE)
                 yield AgentEvent(
@@ -652,17 +766,6 @@ class AgentLoop:
                 "messages": messages,
             },
         )
-        if self.session_memory_extractor is not None:
-            await self.session_memory_extractor.maybe_extract_after_model_response(
-                messages,
-                self.state,
-                assistant_message=completed_message.assistant_message or {},
-                tool_calls=tool_calls,
-                usage=completed_message.usage,
-            )
-            return
-        if self.session_memory_updater is not None and not tool_calls:
-            await self.session_memory_updater.update_after_turn(messages, self.state)
 
     async def _after_turn_stopped(
         self,

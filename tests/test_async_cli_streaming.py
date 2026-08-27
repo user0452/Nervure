@@ -221,9 +221,11 @@ def test_main_tty_builds_runtime_before_starting_repl(
             app_runtime: CliRuntime,
             *,
             permission_prompter: object = None,
+            user_question_prompter: object = None,
             interaction_host: object = None,
         ) -> None:
             assert permission_prompter is not None
+            assert user_question_prompter is not None
             assert interaction_host is not None
             calls.append(("init", app_runtime))
 
@@ -236,12 +238,14 @@ def test_main_tty_builds_runtime_before_starting_repl(
         *,
         trust_prompt: object = None,
         permission_prompter: object = None,
+        user_question_prompter: object = None,
         mcp_trust_mode: str = "",
         **kwargs: object,
     ) -> CliRuntime:
         assert kwargs == {}
         assert workspace == tmp_path
         assert permission_prompter is not None
+        assert user_question_prompter is not None
         assert trust_prompt is not None
         # The inline REPL prompts for MCP trust on startup (batch mode
         # still skips it).

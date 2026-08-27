@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from infrastructure.filesystem.onecode_paths import session_dir, sessions_dir
+from infrastructure.filesystem.nervure_paths import session_dir, sessions_dir
 from services.errors import OneCodeError, ErrorCategory
 from services.observability.error_log import ErrorLogRecorder, JsonlErrorLogSink
 

@@ -1,15 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+from typing import Any
 
 from core.runtime_state import RuntimeState
 from core.context_engine import ContextEngine
 from services.compaction import ContextCompactionService
+from services.context.current_model_context import CurrentModelContext
+from services.context.snapshot import ContextSnapshot
+from services.model.stream import ModelStreamEvent
+from services.model.types import LLMResponse, ModelUsage
 from utils.toolResultStorage import ToolResultStorage
 from services.compaction.service import MICROCOMPACT_PLACEHOLDER
 from services.compaction.types import CompactionConfig, CompactionTrigger
 from services.context.message_store import MessageStore
 from services.tools.types import ToolExecutionResult
+
+
+@dataclass
+class FakeModelClient:
+    response: LLMResponse
+    snapshots: list[ContextSnapshot] = field(default_factory=list)
+
+    async def stream(self, snapshot: ContextSnapshot):
+        self.snapshots.append(snapshot)
+        yield ModelStreamEvent.message_completed(
+            assistant_message=self.response.assistant_message,
+            final_text=self.response.final_text,
+            tool_calls=self.response.tool_calls,
+            usage=self.response.usage,
+        )
 
 
 def _prepare(
@@ -191,3 +212,161 @@ def test_compaction_preparer_populates_context_snapshot_refs_and_hints(tmp_path)
     assert snapshot.transcript_refs == (
         snapshot.messages[1]["metadata"]["stored_result_path"],
     )
+
+
+def test_full_compact_uses_one_cache_safe_snapshot_request(tmp_path) -> None:
+    state = RuntimeState(session_id="session-full-compact")
+    message_store = MessageStore(
+        transcript_root=tmp_path / ".onecode",
+        session_id=state.session_id,
+        flush_interval_seconds=60,
+    )
+    parent_messages = (
+        {"role": "user", "content": "Implement the feature"},
+        {"role": "assistant", "content": "Current implementation"},
+    )
+    for message in parent_messages:
+        if message["role"] == "user":
+            message_store.append_user(message["content"])
+        else:
+            message_store.append_assistant(message)
+    parent_tools = ({"name": "read_file", "input_schema": {"type": "object"}},)
+    current_context = CurrentModelContext(
+        ContextSnapshot(
+            system_prompt="PARENT SYSTEM",
+            messages=parent_messages,
+            tool_schemas=parent_tools,
+        )
+    )
+    model = FakeModelClient(
+        LLMResponse(
+            assistant_message={"role": "assistant", "content": "summary"},
+            final_text=(
+                "<summary># Task\nImplement the feature\n# Next Step\nContinue.</summary>"
+            ),
+            usage=ModelUsage(input_tokens=120, output_tokens=12, cache_read_input_tokens=100),
+        )
+    )
+    service = ContextCompactionService(
+        message_store=message_store,
+        model_client=model,
+        current_model_context=current_context,
+        config=CompactionConfig(
+            context_window_tokens=128_000,
+            recent_tail_min_tokens=1,
+            recent_tail_max_tokens=10_000,
+        ),
+    )
+
+    result = asyncio.run(service.manual_compact(state, focus="feature"))
+
+    assert len(model.snapshots) == 1
+    request = model.snapshots[0]
+    assert request.system_prompt == current_context.snapshot.system_prompt
+    assert request.tool_schemas == current_context.snapshot.tool_schemas
+    assert request.messages[: len(parent_messages)] == parent_messages
+    assert request.messages[-1]["metadata"]["is_compact_instruction"] is True
+    assert "system prompt" in request.messages[-1]["content"]
+    assert "tool definitions/schemas" in request.messages[-1]["content"]
+    assert result.metadata["summary_output_tokens"] == 12
+    assert message_store.current_messages()[0]["metadata"]["is_compact_boundary"] is True
+    message_store.flush_transcript()
+    assert message_store.transcript_store.messages_path.exists()
+
+
+def test_full_compact_without_snapshot_uses_safe_projected_fallback(tmp_path) -> None:
+    state = RuntimeState(session_id="session-full-fallback")
+    message_store = MessageStore(
+        transcript_root=tmp_path / ".onecode",
+        session_id=state.session_id,
+        flush_interval_seconds=60,
+    )
+    message_store.append_user("fallback task")
+    model = FakeModelClient(
+        LLMResponse(
+            assistant_message={"role": "assistant", "content": "summary"},
+            final_text="<summary>safe fallback</summary>",
+        )
+    )
+    service = ContextCompactionService(
+        message_store=message_store,
+        model_client=model,
+        current_model_context=CurrentModelContext(),
+    )
+
+    result = asyncio.run(service.manual_compact(state))
+
+    assert result.metadata["source"] == "full"
+    assert len(model.snapshots) == 1
+    assert model.snapshots[0].system_prompt == ""
+    assert model.snapshots[0].tool_schemas == ()
+    assert model.snapshots[0].messages[-1]["metadata"]["is_compact_instruction"] is True
+
+
+def test_full_compact_never_executes_model_tool_calls(tmp_path) -> None:
+    state = RuntimeState(session_id="session-full-tool-error")
+    message_store = MessageStore(
+        transcript_root=tmp_path / ".onecode",
+        session_id=state.session_id,
+        flush_interval_seconds=60,
+    )
+    message_store.append_user("task")
+    model = FakeModelClient(
+        LLMResponse(
+            assistant_message={"role": "assistant", "content": []},
+            final_text="",
+            tool_calls=(),
+        )
+    )
+    # The provider-neutral event can still report a tool call via metadata in
+    # a custom client; this fake is replaced below with that one-event client.
+    class ToolCallModel(FakeModelClient):
+        async def stream(self, snapshot: ContextSnapshot):
+            self.snapshots.append(snapshot)
+            yield ModelStreamEvent.message_completed(
+                assistant_message={"role": "assistant", "content": []},
+                final_text="",
+                tool_calls=(object(),),  # type: ignore[arg-type]
+            )
+
+    model = ToolCallModel(model.response)
+    service = ContextCompactionService(message_store=message_store, model_client=model)
+
+    try:
+        asyncio.run(service.manual_compact(state))
+    except RuntimeError as exc:
+        assert "tool calls" in str(exc)
+    else:
+        raise AssertionError("compact tool calls must fail without a second request")
+    assert len(model.snapshots) == 1
+
+
+def test_recent_tail_keeps_latest_user_turn_and_tool_pair() -> None:
+    service = ContextCompactionService(
+        config=CompactionConfig(
+            context_window_tokens=128_000,
+            compact_recent_tail_ratio=0.01,
+            recent_tail_min_tokens=1,
+            recent_tail_max_tokens=1,
+        )
+    )
+    messages = (
+        {"role": "user", "content": "old task"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "latest task"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-1", "name": "read_file"}],
+        },
+        {
+            "role": "tool_result",
+            "tool_call_id": "call-1",
+            "tool_name": "read_file",
+            "content": "latest result",
+        },
+    )
+
+    tail = service._recent_tail(messages)
+
+    assert tail == messages[2:]

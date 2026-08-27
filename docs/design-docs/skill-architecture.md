@@ -33,7 +33,7 @@
 
 ### 发现来源与 catalog
 
-`SkillLoader` 发现顺序：`bundled` → `user`（`$ONECODE_HOME/skills` 或 `~/.onecode/skills`）→ `project`（`{cwd}/.onecode/skills/<name>/SKILL.md`），后者覆盖同名，按 cwd 缓存。`LoaderSkillCatalogProvider.visible_skills()` 过滤 `user_invocable=True`、`disable_model_invocation=False`、不在 `state.metadata["denied_skills"]`/`disabled_skills` 的技能，注入 prompt `# Available Skills` section（只列 name/description/when_to_use，≤8000 字符，见 `prompt-architecture.md`）。
+`SkillLoader` 发现顺序：`bundled` → `user`（`$NERVURE_HOME/skills` 或 `~/.nervure/skills`，兼容旧 `.onecode/skills`）→ `project`（`{cwd}/.nervure/skills/<name>/SKILL.md`，兼容旧 `.onecode/skills`），后者覆盖同名，按 cwd 缓存。`LoaderSkillCatalogProvider.visible_skills()` 过滤 `user_invocable=True`、`disable_model_invocation=False`、不在 `state.metadata["denied_skills"]`/`disabled_skills` 的技能，注入 prompt `# Available Skills` section（只列 name/description/when_to_use，≤8000 字符，见 `prompt-architecture.md`）。
 
 ## 核心数据流
 

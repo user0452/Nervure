@@ -11,7 +11,7 @@ from typing import Any
 from core.runtime_state import RuntimeState
 from services.context.message_store import MessageStore
 from services.context.transcript import JsonlTranscriptStore, VALID_MESSAGE_ROLES
-from infrastructure.filesystem.onecode_paths import sessions_dir
+from infrastructure.filesystem.nervure_paths import session_roots
 from services.tools.file_state import FileStateCache
 from ui.cli.types import CliRuntime
 from ui.cli.views.common import preview
@@ -27,11 +27,10 @@ class SessionSummary:
 
 
 def list_session_summaries(workspace: Path) -> tuple[SessionSummary, ...]:
-    root = sessions_dir(workspace)
-    if not root.exists():
-        return ()
     summaries = [
         summary
+        for root in session_roots(workspace)
+        if root.exists()
         for messages_path in root.glob("*/messages.jsonl")
         if (summary := summarize_session(messages_path)) is not None
     ]
@@ -91,7 +90,7 @@ def summarize_session(messages_path: Path) -> SessionSummary | None:
 
 def resolve_resume_target(workspace: Path, target: str) -> JsonlTranscriptStore:
     workspace = workspace.resolve()
-    sessions_root = sessions_dir(workspace).resolve()
+    session_root_candidates = tuple(root.resolve() for root in session_roots(workspace))
     target_path = Path(target).expanduser()
     if not target_path.is_absolute():
         target_path = workspace / target_path
@@ -99,9 +98,15 @@ def resolve_resume_target(workspace: Path, target: str) -> JsonlTranscriptStore:
     if target_path.suffix.lower() == ".jsonl" or target_path.is_file():
         messages_path = target_path
     else:
-        messages_path = sessions_dir(workspace) / target / "messages.jsonl"
+        candidates = tuple(
+            root / target / "messages.jsonl" for root in session_root_candidates
+        )
+        messages_path = next(
+            (candidate for candidate in candidates if candidate.exists()),
+            candidates[0],
+        )
     messages_path = messages_path.resolve()
-    _ensure_inside_sessions_root(messages_path, sessions_root)
+    _ensure_inside_session_roots(messages_path, session_root_candidates)
 
     if not messages_path.exists():
         raise ValueError(f"Transcript does not exist: {messages_path}")
@@ -209,13 +214,16 @@ def _truncate_title(value: str) -> str:
     return text[:57] + "..."
 
 
-def _ensure_inside_sessions_root(messages_path: Path, sessions_root: Path) -> None:
-    try:
-        messages_path.relative_to(sessions_root)
-    except ValueError:
-        raise ValueError(
-            f"Resume target must be inside current workspace .onecode/sessions: {messages_path}"
-        ) from None
+def _ensure_inside_session_roots(messages_path: Path, roots: tuple[Path, ...]) -> None:
+    for root in roots:
+        try:
+            messages_path.relative_to(root)
+            return
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Resume target must be inside current workspace Nervure session storage: {messages_path}"
+    )
 
 
 def _int_or_none(value: Any) -> int | None:

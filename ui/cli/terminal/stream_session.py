@@ -226,7 +226,7 @@ class StreamingSession:
         self._finalised = True
         if self._cancel.is_set():
             self.coordinator.queue_status_line(
-                Text("已取消", style="onecode.warning")
+                Text("已取消", style="nervure.warning")
             )
         # 在 session 收尾阶段,可能 reducer 还在最后一波 commit 之
         # 中(例如 ``completed`` 事件触发的 assistant_markdown),
@@ -317,6 +317,26 @@ class StreamingSession:
         for commit in self.state.pending_static_commits:
             if commit.committed:
                 continue
+            if commit.is_tool_result:
+                group = self.state.activity_group_for_tool(
+                    getattr(commit.payload, "tool_call_id", "")
+                )
+                if (
+                    self.state.activity_enabled
+                    and group is not None
+                ):
+                    if not group.committed:
+                        # Hold raw result commits until the group has all
+                        # results.  This prevents a fast first tool from
+                        # leaking a level-three result line before the
+                        # collapsed group can be committed.
+                        continue
+                    # The raw result checkpoint is retained for attribution
+                    # and ordering tests, but the terminal representation for
+                    # a complete activity group is the single collapsed
+                    # summary checkpoint.
+                    commit.committed = True
+                    continue
             self.coordinator.queue_commit(commit, workspace=self._workspace)
             commit.committed = True
 
@@ -334,9 +354,9 @@ class StreamingSession:
             except Exception:
                 width = 80
             if self._interaction_host is not None:
-                permission_body = self._interaction_host.render_body(width=width)
-                if permission_body is not None:
-                    return permission_body
+                interaction_body = self._interaction_host.render_body(width=width)
+                if interaction_body is not None:
+                    return interaction_body
             # 当运行中输入框共享同一个 InputQueue 时,把队列快照
             # 传给 view 以便在动态区显示 queued preview;否则不
             # 传(None 表示空预览,不会显示额外行)。
@@ -351,9 +371,9 @@ class StreamingSession:
 
         def status_text():  # type: ignore[no-untyped-def]
             if self._interaction_host is not None:
-                permission_status = self._interaction_host.render_status()
-                if permission_status is not None:
-                    return permission_status
+                interaction_status = self._interaction_host.render_status()
+                if interaction_status is not None:
+                    return interaction_status
             return render_status_fragments(self.state)
 
         preview_window = Window(
@@ -466,15 +486,26 @@ class StreamingSession:
         """
 
         bindings = KeyBindings()
-        no_permission_modal = Condition(
+        no_modal = Condition(
             lambda: self._interaction_host is None
-            or self._interaction_host.active_permission is None
+            or (
+                self._interaction_host.active_permission is None
+                and self._interaction_host.active_question is None
+            )
         )
 
-        @bindings.add(Keys.Escape, eager=True, filter=no_permission_modal)
-        @bindings.add(Keys.ControlC, eager=True, filter=no_permission_modal)
+        @bindings.add(Keys.Escape, eager=True, filter=no_modal)
+        @bindings.add(Keys.ControlC, eager=True, filter=no_modal)
         def _on_cancel(event) -> None:  # type: ignore[no-untyped-def]
             self._cancel_turn(event)
+
+        @bindings.add(Keys.ControlO, eager=True, filter=no_modal)
+        def _on_toggle_activity(event) -> None:  # type: ignore[no-untyped-def]
+            # Ctrl+O is a non-typing interaction owned by the dynamic
+            # activity view.  The running input buffer keeps normal focus;
+            # only this explicit shortcut changes presentation state.
+            self.state.activities_expanded = not self.state.activities_expanded
+            _safe_invalidate(event.app)
 
         if self._interaction_host is not None:
             return merge_key_bindings(
@@ -489,6 +520,13 @@ class StreamingSession:
         return bindings
 
     def _cancel_turn(self, event) -> None:  # type: ignore[no-untyped-def]
+        if self._runtime is not None:
+            from core.runtime_state import InteractionKind
+
+            self._runtime.state.suspend(
+                InteractionKind.USER_INTERRUPT,
+                payload={"reason": "user_cancelled_turn"},
+            )
         self._cancel.set()
         event.app.exit()
 

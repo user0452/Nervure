@@ -1,10 +1,15 @@
 # CLI Architecture
 
-本文描述 `ui/cli/` 的架构。CLI 是 OneCode 当前的增强 REPL 界面，负责应用装配、交互输入、命令处理、附件收集、权限提示和终端渲染，但不实现 agent 主循环、工具执行、安全策略或 provider 协议。
+本文描述 `ui/cli/` 的架构。CLI 是 Nervure 当前的增强 REPL 界面，负责应用装配、交互输入、命令处理、附件收集、权限提示和终端渲染，但不实现 agent 主循环、工具执行、安全策略或 provider 协议。
 
 启动：`uv run python -m ui.cli.app`（TTY 时启动内联终端 REPL；stdin 非 TTY 时走 batch 路径）。
 
-TTY 路径采用 **内联终端渲染模型**（与 Claude Code / Ink 的 Static + dynamic 分层同类，基于 `prompt_toolkit` + Rich）：定稿内容打印进终端正常缓冲区（继承终端明暗背景、可向上滚动回看）；底部输入框、流式预览、斜杠补全画在可擦除的动态区；`/status`、`/resume` 等临时界面进入备用屏幕（DEC 1049），退出后主屏幕恢复且临时内容不进入 scrollback。
+TTY 使用 `terminal.persistent_app.PersistentTerminalApp` 作为唯一渲染所有者：整个
+交互生命周期只有一个 prompt_toolkit `Application`。用户消息、Activity、工具明细、
+assistant 流式文本、HITL Interaction Pane 和输入框都在同一棵 render tree 中；agent event 只
+更新 ViewModel，不直接写 stdout。Batch/non-TTY 仍走原有纯文本路径。
+
+TTY 路径采用 **单一持久渲染树**（基于 `prompt_toolkit`）：transcript、Activity、流式预览、HITL Interaction Pane 和输入框始终由同一个 `Application` 绘制。内容是否可回看由 transcript ViewModel 决定，不通过第二个 streaming application 或 `run_in_terminal` 写静态 scrollback；`/status`、`/resume` 等临时界面仍可进入备用屏幕（DEC 1049）。
 
 ## 文件职责
 
@@ -13,7 +18,7 @@ TTY 路径采用 **内联终端渲染模型**（与 Claude Code / Ink 的 Static
 | `app.py` | `build_runtime()` 依赖装配、`main()` 入口分流、MCP trust/skip 处理、长期记忆 dream 钩子 |
 | `batch.py` | 非交互 batch：读 stdin 一行、`loop.stream()` 流式打印到 stdout |
 | `input.py` | `read_batch_line()`、fallback `read_confirm_sync()`（MCP trust / batch 权限） |
-| `terminal/` | 内联终端 REPL：`InlineRepl` 主循环、静态/动态区渲染、备用屏幕查看页和临时确认界面（见下表） |
+| `terminal/` | 内联终端 REPL：`InlineRepl` 主循环、持久 render tree、备用屏幕查看页和临时确认界面（见下表） |
 | `commands.py` | `CommandSpec` 注册表、slash command 解析与 `dispatch_command()` 分发 |
 | `suggestions.py` | `/` 命令、`/resume` 参数、`@file` 内联补全数据 |
 | `resume.py` | session summary 扫描、标题派生、transcript target 解析和恢复 helper |
@@ -31,21 +36,24 @@ TTY 路径采用 **内联终端渲染模型**（与 Claude Code / Ink 的 Static
 |:---|:---|
 | `repl.py` | `InlineRepl` 主循环：装配、读输入、dispatch、`run_agent`、shutdown |
 | `detect.py` | 终端背景明暗探测（OSC 11 → COLORFGBG → dark） |
-| `static_output.py` | 静态区打印：反色用户行、`onecode>` 前缀、工具横幅/结果、未信任 MCP 提示 |
-| `prompt_session.py` | 动态区输入框：上下边框、`/`/`@` 补全菜单、Enter/Tab 语义（空闲态提交） |
+| `static_output.py` | 静态区打印：反色用户行、`Nervure>` 前缀、工具横幅/结果、未信任 MCP 提示 |
+| `prompt_session.py` | 兼容输入实现；persistent TTY 主路径由 `persistent_app.py` 的 Buffer 接管 |
 | `completer.py` | `suggestions_for` → prompt_toolkit `Completer` 适配 |
 | `queue.py` | 运行中输入队列（FIFO of `QueuedInput`，区分 prompt / slash） |
-| `stream_session.py` | 流式动态区：live Markdown 预览（ANSI 节流重绘）、Esc 取消、**运行中输入框**（同 Application 内底部 Buffer，Enter 入队）、通过 `output_coordinator.py` 调度静态区写入 |
+| `stream_session.py` | 兼容/测试用旧流式会话；persistent TTY 主路径直接在 `PersistentTerminalApp` 内消费 reducer 状态 |
+| `persistent_app.py` | TTY 唯一 render owner：持久 transcript、Activity 折叠/鼠标 hit region、流式文本、HITL Interaction Pane 和输入框 |
 | `stream_state.py` | turn 内 UI 状态模型 `CliStreamUiState`（streaming_text / tools / pending_static_commits / stream_mode） |
 | `stream_reducer.py` | 纯函数 `reduce_stream_event`，事件 → state；无 I/O |
 | `stream_view.py` | `render_stream_body_ansi` / `render_status_fragments` 把 state 翻译成 prompt_toolkit 可显示文本 |
-| `output_coordinator.py` | `TerminalOutputCoordinator` — 流式会话里唯一允许写静态区的组件 |
+| `output_coordinator.py` | 兼容旧流式会话和 batch 的提交协调器；persistent TTY turn 不调用它 |
 | `transient.py` | DEC 1049 备用屏幕生命周期 + `can_enter_alternate_screen` 能力守卫 |
 | `page.py` | 备用屏幕分页查看 renderable（`/status` 等），Esc 返回 |
 | `selector.py` | 备用屏幕列表选择（`/resume`） |
 | `connect_flow.py` | `/connect` 多步向导（备用屏幕） |
-| `interaction_host.py` | TTY 临时交互 host，持有权限 modal 等可擦除交互状态 |
+| `interaction_host.py` | TTY 临时交互 host，统一持有 Permission / AskUser / PlanReview 可擦除状态，并把自由文本复用到底部 Buffer |
 | `permission_modal.py` | 权限请求 modal 状态、三选项构建和 ANSI 渲染 |
+| `question_modal.py` | AskUser 选择题/自由文本题状态与 ANSI 渲染 |
+| `plan_review_modal.py` | Plan Review 三选项、修改反馈阶段和 ANSI 渲染 |
 | `permission_prompt.py` | `TtyPermissionPrompter` 薄封装，把权限请求委托给 interaction host |
 | `trust_prompt.py` | MCP trust 启动期确认 |
 
@@ -56,9 +64,10 @@ TTY 路径采用 **内联终端渲染模型**（与 Claude Code / Ink 的 Static
 
 ## 内联布局（`terminal/`）
 
-- **静态区**（终端 scrollback，`static_output.py`）：banner、反色 `>` 用户行、`onecode>` 助手前缀 + Markdown 定稿、工具横幅与结果摘要。用绑定 `sys.stdout` 的 Rich `Console` 打印，**不设 background**，背景由终端宿主提供。
-- **动态区**（`prompt_session.py` / `stream_session.py`）：非全屏 `prompt_toolkit.Application(full_screen=False, erase_when_done=True)`。空闲时是带上下 `─` 边框的输入框（`PromptSession`）；agent 运行时是同一个 prompt_toolkit 应用承载的 live Markdown 流式预览 + 状态行 + 底部 running input box（`StreamingSession`）。阶段结束时动态区自擦除，不污染 scrollback。
-- **备用屏幕**（`transient.py` 等）：全屏临时界面用 `prompt_toolkit` `full_screen=True`（其自身管理 DEC 1049）。`transient.py` 暴露 `can_enter_alternate_screen()` 作为 TTY 能力守卫，以及直接渲染 Rich 时可用的 `transient_terminal_scope()` 上下文。
+- **持久交互区**（`persistent_app.py`）：唯一的全屏 `prompt_toolkit.Application`。启动交互式 Nervure 后进入 alternate screen（DEC 1049），固定顶部 Header，中间维护可滚动 transcript / Activity / assistant 流式文本，底部保留 HITL Interaction Pane、输入分隔线和输入 Buffer；退出应用后返回原 PowerShell/terminal 屏幕。运行中的 turn 不写静态 scrollback，也不创建第二个 streaming application。
+- **对话层级**：用户 turn 在 transcript 中渲染为独立 `You` 边框块，不再和 assistant/Activity 使用同一种普通文本行；assistant progress text 与 Activity 仍按 model turn 交错显示。
+- **兼容静态输出**（`static_output.py` / `output_coordinator.py`）：只供 Batch、旧命令页面和兼容测试使用，不参与 persistent TTY turn 的渲染。
+- **备用屏幕**（`transient.py` 等）：仍供主 persistent app 之外的启动期/兼容临时界面使用。persistent TTY 运行后 Permission / AskUser / PlanReview 都留在同一个 full-screen render tree 内，不嵌套第二个 alternate-screen Application。
 
 ## 接口设计
 
@@ -78,41 +87,44 @@ build_runtime(
 
 ### 主对话流
 
-`InlineRepl._run_turn()` 把 `runtime.loop.stream()` 事件交给 `stream_session.StreamingSession`，由其拥有动态区预览与 Esc 取消。事件流路径：
+`InlineRepl._run_turn()` 把 `runtime.loop.stream()` 事件交给持久的 `PersistentTerminalApp`。事件只经过 reducer 更新 ViewModel，再由唯一 render tree 重绘：
+
+Activity 的 provider-neutral 控制字段位于 `ModelStreamEvent.metadata`：
+`activity_id`（阶段身份）和 `activity_title`（用户可见标题）会随
+`core.loop` 转发到 `tool_call_ready`。没有这些字段时，UI 只用工具类别作
+低成本语义回退（分析/修改/测试/命令），`Working…` 仅保留为最终未知工具的安全兜底。
 
 ```mermaid
 flowchart LR
-  Loop["AgentLoop.stream()"] --> Session["StreamingSession"]
-  Session --> Coalescer["StreamingCoalescer"]
+  Loop["AgentLoop.stream()"] --> App["PersistentTerminalApp"]
+  App --> Coalescer["StreamingCoalescer"]
   Coalescer --> Reducer["reduce_stream_event (pure)"]
   Reducer --> State["CliStreamUiState"]
   State --> View["render_stream_body_ansi / render_status_fragments"]
-  State --> Coord["TerminalOutputCoordinator (queue only)"]
-  Coord --> Static["static_output.print_tool_result / print_assistant_markdown"]
-  View --> App["prompt_toolkit dynamic app"]
+  State --> View["Persistent render tree"]
+  View --> App
 ```
 
 | 事件 | UI 行为 |
 |:---|:---|
 | `assistant_delta` | 累加到 `state.streaming_text` → 动态区 live Markdown 预览（50ms 节流，ANSI 渲染）。reducer 强制要求事件 metadata 携带稳定的 `assistant_call_id` 和 `model_turn_index`，缺失则进入 error 状态。 |
-| `assistant_message_completed` | reducer 立即把当前 `streaming_text` 打包成 `StaticCommit(assistant_markdown)` 入队，然后清空 `streaming_text`。动态区不再保留已定稿文本，新的 assistant 文本从空区开始。 |
+| `assistant_message_completed` | reducer 完成一段 assistant 文本；persistent app 将其保存在当前 turn transcript，继续由同一棵 render tree 显示。 |
 | `tool_call_ready` / `tool_started` / `tool_progress` | reducer 维护 `state.tools`（queued / running），记录 `tool_call_id → assistant_call_id` 和 `tool_call_id → declared_index` 映射；view 在 body 显示 `tool: <name>` 列表；状态行显示 `tool: <name>` 或 `tools: N running`（**不会**显示裸 `thinking…`） |
-| `tool_result` | reducer 把 `ToolExecutionResult` 暂存到 `completed_tool_results_by_assistant[assistant_call_id][declared_index]`，然后通过 `release_ready_tool_result_commits` 只释放"同一 assistant_call_id 下从最小未提交 index 开始连续完成"的结果到 `state.pending_static_commits`；`StreamingSession._commit_pending_to_coordinator` 转交给 `TerminalOutputCoordinator`，coordinator 在事件循环内立即 `flush_ready_checkpoints` 写入静态区。**不再**等 turn 结束。 |
+| `tool_result` | reducer 更新对应 ActivityToolCall 的完成/错误状态；结果正文仍由普通 transcript/trace 路径持有，不灌入 Activity 明细。 |
 | `completed` | reducer 翻 `turn_completed`；如果 `streaming_text` 仍有残留（例如 provider 没发 `assistant_message_completed`），兜底 commit 一次并清空。已完成 commit 不会重复打印。 |
 | `error` | reducer 写入 `state.error_text`，view 在 body 尾部显示；coordinator 不再为 error 打印额外块。 |
 
-完成后动态区擦除，最终 Markdown 留在 scrollback。Esc 设置取消标志、退出预览 app，coordinator 通过 `queue_status_line` 打印「已取消」。
+turn 完成后 Activity 与 assistant 文本提交到 persistent transcript，应用继续保留输入框。Esc 只取消当前 submit task，不销毁 render owner；HITL modal 活跃时由 interaction host 优先消费取消键。
 
 ### Checkpoint 提交模型（execplan §M1/§M2/§M3/§M4）
 
-`static_output.print_*` 仍然是**唯一**允许写入静态区的入口。reducer / view / `StreamingSession` 都只能 stage 状态；它们**不**直接调用 `print_tool_result` 或 `print_assistant_markdown`。`TerminalOutputCoordinator` 是流式会话里**唯一**允许把这些状态写入静态区的组件：
+旧的 `static_output.print_*` / `TerminalOutputCoordinator` 仍是兼容路径的输出边界，但 persistent TTY 不使用静态写入：reducer / view / `PersistentTerminalApp` 只修改并渲染 transcript ViewModel，唯一的 prompt_toolkit Application 负责屏幕更新。
 
-- `queue_commit(commit, *, workspace=None)` 只把 `StaticCommit` 追加到内部队列，**不**写 stdout。
-- `flush_ready_checkpoints()` 是 async 提交边界。`StreamingSession` 在事件循环内每次 `apply_event` 后 await 它（不再等 turn 结束）；当 dynamic app 仍在运行时，coordinator 通过 `prompt_toolkit.run_in_terminal` 临时挂起动态区再写静态 scrollback，避免 Rich 静态输出覆盖输入框。
+- `queue_commit` / `flush_ready_checkpoints` 只服务旧 `StreamingSession` 和 batch 兼容测试，不是 persistent TTY 的提交边界。
 
 每条 `StaticCommit` 携带稳定的 `assistant_call_id`（由 `core/stream_events.py::mint_assistant_call_id` 派生）和 `model_turn_index`，作为 assistant message → tool call → tool result 的 UI 归属回链。reducer 在 `tool_result` 时按**声明顺序**（`declared_index`）释放，不允许"后声明但先完成"的工具越过前面的工具。
 
-权限确认不走 agent event 流，但也不由 prompter 自己打印确认文本。TTY 路径由 `terminal.interaction_host.TerminalInteractionHost` 持有临时 permission modal；`permission_prompt.TtyPermissionPrompter` 只把 `request_permission()` 委托给这个 host。流式预览 app 正在运行时，modal 直接占用当前动态区，用户用 `1/2/3`、`↑↓ + Enter` 或 `Esc` 返回 `PermissionResponse`；选择完成后 modal state 清空，动态区恢复 assistant/tool preview，不污染 scrollback。空闲状态下 host 启动一个 `full_screen=False, erase_when_done=True` 的临时 app，使用同一套 modal renderer 和 key bindings。
+权限确认不走 agent event 流，但也不由 prompter 自己打印确认文本。TTY 路径由 `terminal.interaction_host.TerminalInteractionHost` 统一持有 Permission / AskUser / PlanReview 临时 modal；`permission_prompt.TtyPermissionPrompter` 只把 `request_permission()` 委托给这个 host。持久 app 正在运行时，Interaction Pane 固定渲染在输入框上方；选择型交互由 `1/2/3`、`↑↓ + Enter` 或 `Esc` 驱动，自由文本 AskUser 和 Plan Review 修改意见则复用底部 Buffer 的 Enter。完成后 modal state 清空，Pane 消失且不污染 transcript。空闲状态下 host 启动一个 `full_screen=False, erase_when_done=True` 的临时 app，使用同一套 modal renderer 和 key bindings。
 
 ### Command Registry
 
@@ -131,18 +143,18 @@ flowchart LR
 flowchart TD
   Entry["main() TTY path"] --> Build["build_runtime(mcp_trust_mode=prompt)"]
   Build --> Repl["InlineRepl(runtime).run()"]
-  Repl --> Banner["静态区 banner + 未信任 MCP 提示"]
-  Repl --> Prompt["PromptSession.read (动态区)"]
+  Repl --> Banner["Persistent transcript banner + 未信任 MCP 提示"]
+  Repl --> Prompt["PersistentTerminalApp Buffer"]
   Prompt --> Cmd{以 / 开头?}
   Cmd -->|是| Dispatch["dispatch_command"]
   Dispatch --> Modal{"interaction / presentation"}
   Modal -->|page| Page["TransientPage (备用屏幕)"]
   Modal -->|resume| Select["TransientSelector (备用屏幕)"]
   Modal -->|connect| Connect["run_connect_flow (备用屏幕)"]
-  Modal -->|inline| Log["静态区 Console.print"]
+  Modal -->|inline| Log["Persistent transcript notice"]
   Cmd -->|否| Agent["_run_turn"]
-  Agent --> Stream["loop.stream → StreamingSession"]
-  Stream --> Preview["动态区 live Markdown + 静态区工具横幅"]
+  Agent --> Stream["loop.stream → PersistentTerminalApp.consume_events"]
+  Stream --> Preview["同一 render tree 的 Activity + live Markdown"]
   Stream --> Perm["TtyPermissionPrompter"]
 ```
 
@@ -154,12 +166,12 @@ flowchart TD
 
 ### 补全与输入语义
 
-`suggestions.py` 的 `suggestions_for(runtime, text, cursor)` 经 `completer.InlineCompleter` 接入 prompt_toolkit。菜单打开时：↑↓ 移动选中项；**Enter 采纳并提交**选中项（无选中则提交字面文本）；**Tab 仅将选中项填入输入框、不提交**。运行中输入框（`StreamingSession` 动态区底部）通过 buffer 的 `accept_handler` 把 Enter 翻译成 `InputQueue.push`，因此 agent 输出期间继续输入不会被吞掉、也不会打断当前 turn。
+`suggestions.py` 的 `suggestions_for(runtime, text, cursor)` 经 `completer.InlineCompleter` 接入 prompt_toolkit。菜单打开时：↑↓ 移动选中项；**Enter 采纳并提交**选中项（无选中则提交字面文本）；**Tab 仅将选中项填入输入框、不提交**。运行中输入框（`PersistentTerminalApp` 底部 Buffer）把 Enter 翻译成 `InputQueue.push`，因此 agent 输出期间继续输入不会被吞掉、也不会打断当前 turn。
 
 **输入归口**：
 
-- **空闲态提交** 归 `PromptSession`：它只读用户输入、发出 `SubmissionKind.SUBMIT` / `CANCEL` / `EXIT`，不触碰 `InputQueue`。
-- **运行中提交** 归 `StreamingSession`：底部 input box 共享同一个 `InputQueue`；`accept_handler` 入队后清空 buffer。
+- **空闲态提交** 归 `PersistentTerminalApp`：Buffer 的 Enter binding 创建 submit task。
+- **运行中提交** 仍归同一个 `PersistentTerminalApp`：底部 Buffer 共享同一个 `InputQueue`；Enter 入队后清空 buffer。
 - **队列 drain** 归 `InlineRepl._drain_queue`：当前 turn 结束后按 FIFO 弹出 `QueuedInput`，`kind == "slash"` 的走 `_handle_command`（不进 agent），`kind == "prompt"` 的走 `_run_turn`。
 - 动态区 `view` 渲染 `queued_inputs` 快照，列出最多 N 条可见命令并折叠 overflow 摘要；这些行只在动态区显示，永远不写进静态 scrollback。
 
@@ -191,4 +203,4 @@ TTY：`TerminalInteractionHost` 使用可擦除临时 permission modal，只消�
 
 ## 当前限制
 
-batch 路径仍为单行 stdin、纯文本 stdout，无 Markdown 渲染。动态区 live Markdown 预览有界高度（仅显示尾部若干行），完整内容在轮结束时定稿到静态区。流式过程中真正的按键级 Esc 取消依赖动态区预览 app 持有输入焦点。尚缺更细粒度 provider recovery UI。
+batch 路径仍为单行 stdin、纯文本 stdout，无 Markdown 渲染。persistent TTY 的 transcript/Activity/live Markdown 共用一个 Application；当前尚缺更细粒度 provider recovery UI。

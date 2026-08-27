@@ -2,7 +2,7 @@
 
 ## Purpose
 
-OneCode is a Python code agent runtime. This file is the entry point for an agent working in this repository. It explains where project knowledge lives, the order to read it, where the code sits, and how to build, test, and extend the project.
+Nervure is a Python code agent runtime. This file is the entry point for an agent working in this repository. It explains where project knowledge lives, the order to read it, where the code sits, and how to build, test, and extend the project.
 
 This file is not an execution plan, architecture document, or task list. For target architecture, read `architecture.md`.
 
@@ -78,11 +78,11 @@ These constraints come from `architecture.md` and are checked by `tests/test_imp
 
 ## Environment Setup
 
-OneCode uses `uv`.
+Nervure uses `uv`.
 
 - Sync the virtual environment: `uv sync --dev`.
 - Activate on Windows: `.\.venv\Scripts\Activate.ps1`.
-- Copy `.env.example` to `.env` for local model provider settings. OneCode reads model provider variables only from `.env`.
+- Copy `.env.example` to `.env` for local model provider settings. Nervure reads model provider variables only from `.env`.
 
 ## Common Commands
 

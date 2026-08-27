@@ -8,6 +8,7 @@ import inspect
 import json
 import math
 import os
+from time import perf_counter
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 from pathlib import Path
@@ -36,6 +37,7 @@ from utils.toolResultStorage import ToolResultStorage
 
 if TYPE_CHECKING:
     from core.runtime_state import RuntimeState
+    from services.checkpoints import CheckpointStore
 
 
 DEFAULT_MAX_TOOL_CONCURRENCY = 10
@@ -73,6 +75,7 @@ class _HandlerOutcome:
     ready: _ReadyToolCall
     result: ToolExecutionResult | None = None
     exception: Exception | None = None
+    duration_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,7 @@ class RegistryToolExecutor:
         error_log_recorder: ErrorLogRecorder | None = None,
         result_store: ToolResultStorage | None = None,
         file_state_cache: FileStateCache | None = None,
+        checkpoint_store: CheckpointStore | None = None,
     ) -> None:
         self._registry = registry
         self._guard = guard
@@ -121,6 +125,7 @@ class RegistryToolExecutor:
         self._error_log_recorder = error_log_recorder or ErrorLogRecorder.noop()
         self._result_store = result_store
         self._file_state_cache = file_state_cache or FileStateCache()
+        self._checkpoint_store = checkpoint_store
 
     def bind_result_store(self, result_store: ToolResultStorage | None) -> None:
         self._result_store = result_store
@@ -131,6 +136,40 @@ class RegistryToolExecutor:
     @property
     def file_state_cache(self) -> FileStateCache:
         return self._file_state_cache
+
+    def _create_checkpoint_if_needed(self, ready: _ReadyToolCall) -> None:
+        """Snapshot direct file mutation targets after safety preflight.
+
+        This runs after guard/permission approval and immediately before the
+        handler, which means rejected calls create no artifacts and a handler
+        failure still has a usable rollback point.
+        """
+
+        if self._checkpoint_store is None or not ready.classification.modifies_filesystem:
+            return
+        workspace = ready.runtime.state.metadata.get("workspace")
+        workspace_path = Path(workspace) if isinstance(workspace, str) else Path.cwd()
+        paths = tuple(
+            _checkpoint_path(target.normalized_value or target.value, workspace_path)
+            for target in ready.classification.targets
+            if target.kind == "file" and target.operation in {"write", "delete"}
+        )
+        if not paths:
+            return
+        try:
+            checkpoint = self._checkpoint_store.create(
+                session_id=ready.runtime.state.session_id,
+                tool_call_id=ready.tool_call.id,
+                tool_name=ready.descriptor.name,
+                paths=paths,
+            )
+        except Exception as exc:
+            # Checkpoint failure must never crash the tool lifecycle. It is
+            # observable so users can distinguish mutation from rollback proof.
+            self._trace_recorder.event("checkpoint_failed", {"tool_name": ready.descriptor.name, "tool_call_id": ready.tool_call.id, "error_type": type(exc).__name__})
+            return
+        ready.runtime.state.metadata.setdefault("checkpoints", []).append(checkpoint.id)
+        self._trace_recorder.event("checkpoint_created", {"checkpoint_id": checkpoint.id, "tool_name": checkpoint.tool_name, "tool_call_id": checkpoint.tool_call_id, "file_count": len(checkpoint.files)})
 
     async def execute(
         self,
@@ -200,12 +239,15 @@ class RegistryToolExecutor:
         parent_span_id: str | None = None,
     ) -> _ReadyToolCall | ToolExecutionResult:
         """Run all handler-before checks serially for one tool call."""
+        preflight_attributes: dict[str, Any] = {
+            "tool_name": tool_call.name,
+            "tool_call_id": tool_call.id,
+        }
+        if self._trace_recorder.is_debug:
+            preflight_attributes["tool_arguments"] = dict(tool_call.input)
         with self._trace_recorder.span(
             "tool_preflight",
-            {
-                "tool_name": tool_call.name,
-                "tool_call_id": tool_call.id,
-            },
+            preflight_attributes,
             parent_span_id=parent_span_id,
         ) as span:
             descriptor = self._registry.get(tool_call.name)
@@ -333,21 +375,25 @@ class RegistryToolExecutor:
             )
 
     async def _run_handler_async(self, ready: _ReadyToolCall) -> _HandlerOutcome:
+        self._create_checkpoint_if_needed(ready)
+        span_attributes = self._tool_span_attributes(ready)
         if inspect.iscoroutinefunction(ready.descriptor.handler):
             with self._trace_recorder.span(
                 "tool_execution",
-                {
-                    "tool_name": ready.descriptor.name,
-                    "tool_call_id": ready.tool_call.id,
-                },
+                span_attributes,
                 parent_span_id=ready.trace_parent_span_id,
             ):
+                started_at = perf_counter()
                 try:
                     result = await ready.descriptor.handler(
                         ready.tool_input,
                         ready.runtime,
                     )
-                    return _HandlerOutcome(ready=ready, result=result)
+                    return _HandlerOutcome(
+                        ready=ready,
+                        result=result,
+                        duration_ms=_duration_ms(started_at),
+                    )
                 except Exception as exc:
                     self._record_unexpected_tool_error(
                         exc,
@@ -355,23 +401,26 @@ class RegistryToolExecutor:
                         descriptor=ready.descriptor,
                         stage="handler",
                     )
-                    return _HandlerOutcome(ready=ready, exception=exc)
+                    return _HandlerOutcome(
+                        ready=ready,
+                        exception=exc,
+                        duration_ms=_duration_ms(started_at),
+                    )
         return await asyncio.to_thread(self._run_handler, ready)
 
     def _run_handler(self, ready: _ReadyToolCall) -> _HandlerOutcome:
         """Execute only the concrete handler so it can safely run in a worker."""
         with self._trace_recorder.span(
             "tool_execution",
-            {
-                "tool_name": ready.descriptor.name,
-                "tool_call_id": ready.tool_call.id,
-            },
+            self._tool_span_attributes(ready),
             parent_span_id=ready.trace_parent_span_id,
         ):
+            started_at = perf_counter()
             try:
                 return _HandlerOutcome(
                     ready=ready,
                     result=ready.descriptor.handler(ready.tool_input, ready.runtime),
+                    duration_ms=_duration_ms(started_at),
                 )
             except Exception as exc:
                 self._record_unexpected_tool_error(
@@ -380,7 +429,11 @@ class RegistryToolExecutor:
                     descriptor=ready.descriptor,
                     stage="handler",
                 )
-                return _HandlerOutcome(ready=ready, exception=exc)
+                return _HandlerOutcome(
+                    ready=ready,
+                    exception=exc,
+                    duration_ms=_duration_ms(started_at),
+                )
 
     async def _finalize_outcome(
         self,
@@ -401,7 +454,11 @@ class RegistryToolExecutor:
                 ),
                 guard_policies=ready.guard_policies,
             )
-            self._record_tool_result(result, parent_span_id=ready.trace_parent_span_id)
+            self._record_tool_result(
+                result,
+                parent_span_id=ready.trace_parent_span_id,
+                duration_ms=outcome.duration_ms,
+            )
             return result
 
         assert outcome.result is not None
@@ -426,7 +483,11 @@ class RegistryToolExecutor:
                 final_result,
                 guard_policies=ready.guard_policies,
             )
-            self._record_tool_result(result, parent_span_id=ready.trace_parent_span_id)
+            self._record_tool_result(
+                result,
+                parent_span_id=ready.trace_parent_span_id,
+                duration_ms=outcome.duration_ms,
+            )
             return result
         await self._hooks.run(
             HookEvent.POST_TOOL_USE,
@@ -447,8 +508,18 @@ class RegistryToolExecutor:
         self._record_tool_result(
             final_result,
             parent_span_id=ready.trace_parent_span_id,
+            duration_ms=outcome.duration_ms,
         )
         return final_result
+
+    def _tool_span_attributes(self, ready: _ReadyToolCall) -> dict[str, Any]:
+        attributes: dict[str, Any] = {
+            "tool_name": ready.descriptor.name,
+            "tool_call_id": ready.tool_call.id,
+        }
+        if self._trace_recorder.is_debug:
+            attributes["tool_arguments"] = dict(ready.tool_input)
+        return attributes
 
     def _is_concurrency_candidate(
         self,
@@ -758,6 +829,17 @@ class RegistryToolExecutor:
                 permission_decision=decision,
             )
 
+        from core.runtime_state import InteractionKind
+
+        interaction = runtime.state.suspend(
+            InteractionKind.PERMISSION,
+            interaction_id=request.request_id,
+            payload={
+                "tool_name": descriptor.name,
+                "tool_call_id": tool_call.id,
+                "reason": decision.reason,
+            },
+        )
         try:
             with self._trace_recorder.span(
                 "permission_wait",
@@ -789,6 +871,8 @@ class RegistryToolExecutor:
                     "interrupted": True,
                 },
             )
+        finally:
+            runtime.state.resume(interaction_id=interaction.interaction_id)
         if response.action != "allow":
             return _PreparedInputError(
                 _user_denied_result(tool_call, decision, response),
@@ -890,18 +974,31 @@ class RegistryToolExecutor:
         result: ToolExecutionResult,
         *,
         parent_span_id: str | None,
+        duration_ms: float | None = None,
     ) -> None:
+        attributes: dict[str, Any] = {
+            "tool_name": result.tool_name,
+            "tool_call_id": result.tool_call_id,
+            "is_error": result.is_error,
+            "error": result.metadata.get("error"),
+            "content_chars": len(result.content),
+            "result_length": len(result.content),
+            "result_truncated": result.metadata.get("result_truncated") is True,
+            "result_stored": result.metadata.get("result_stored") is True,
+        }
+        if duration_ms is not None:
+            attributes["duration_ms"] = duration_ms
+        if self._trace_recorder.is_debug:
+            debug_result, debug_truncated = self._trace_recorder.debug_text(result.content)
+            attributes["tool_result_text"] = debug_result
+            attributes["truncated"] = (
+                result.metadata.get("result_truncated") is True or debug_truncated
+            )
+        else:
+            attributes["truncated"] = result.metadata.get("result_truncated") is True
         self._trace_recorder.event(
             "tool_result",
-            {
-                "tool_name": result.tool_name,
-                "tool_call_id": result.tool_call_id,
-                "is_error": result.is_error,
-                "error": result.metadata.get("error"),
-                "content_chars": len(result.content),
-                "result_truncated": result.metadata.get("result_truncated") is True,
-                "result_stored": result.metadata.get("result_stored") is True,
-            },
+            attributes,
             parent_span_id=parent_span_id,
         )
 
@@ -1063,6 +1160,15 @@ class RegistryToolExecutor:
             },
         )
         return final_result
+
+
+def _duration_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 3)
+
+
+def _checkpoint_path(value: str, workspace: Path) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else workspace / path
 
 
 def _batch_has_internal_conflict(
@@ -1281,7 +1387,9 @@ def _resolve_max_tool_concurrency(value: int | None = None) -> int:
     if value is not None:
         return value if value >= 1 else DEFAULT_MAX_TOOL_CONCURRENCY
 
-    raw_value = os.environ.get("ONECODE_MAX_TOOL_CONCURRENCY")
+    raw_value = os.environ.get("NERVURE_MAX_TOOL_CONCURRENCY") or os.environ.get(
+        "ONECODE_MAX_TOOL_CONCURRENCY"
+    )
     if raw_value is None or raw_value.strip() == "":
         return DEFAULT_MAX_TOOL_CONCURRENCY
     try:
@@ -1301,7 +1409,7 @@ def _is_long_term_memory_markdown_path(path: str) -> bool:
     target = Path(path)
     parts = [part.lower() for part in target.parts]
     for index, part in enumerate(parts):
-        if part != ".onecode":
+        if part not in {".nervure", ".onecode"}:
             continue
         if index + 1 < len(parts) and parts[index + 1] == "memory":
             return target.suffix.lower() == ".md"
