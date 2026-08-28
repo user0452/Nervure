@@ -36,6 +36,16 @@ class ToolSchemaProvider(Protocol):
         ...
 
 
+class FinalContextBudgetManager(Protocol):
+    async def ensure_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> bool:
+        """Return True when the underlying transcript was compacted."""
+        ...
+
+
 class NoOpContextPreparer:
     def prepare(
         self,
@@ -79,13 +89,27 @@ class ContextEngine:
         prompt_assembler: PromptAssembler | None = None,
         tool_schema_provider: ToolSchemaProvider | None = None,
         context_preparer: ContextPreparer | None = None,
+        final_context_budget_manager: FinalContextBudgetManager | None = None,
     ) -> None:
         self._message_store = message_store
         self._prompt_assembler = prompt_assembler or DynamicPromptAssembler(Path.cwd())
         self._tool_schema_provider = tool_schema_provider or EmptyToolSchemaProvider()
         self._context_preparer = context_preparer or NoOpContextPreparer()
+        self._final_context_budget_manager = final_context_budget_manager
 
     async def build_for_model(self, state: RuntimeState) -> ContextSnapshot:
+        snapshot = await self._build_once(state)
+        if (
+            self._final_context_budget_manager is not None
+            and await self._final_context_budget_manager.ensure_final_context_budget(
+                snapshot,
+                state,
+            )
+        ):
+            snapshot = await self._build_once(state)
+        return snapshot
+
+    async def _build_once(self, state: RuntimeState) -> ContextSnapshot:
         current_messages = self._message_store.current_messages()
         # preparer 是未来 compaction/projector 的边界；当前通常只是透传，
         # 但调用方仍应统一经过这个 awaitable 入口。

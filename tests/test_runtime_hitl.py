@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from core.context_engine import ContextEngine, StaticPromptAssembler
 from core.loop import AgentLoop
-from core.runtime_state import InteractionKind, PermissionMode, RuntimeState
+from core.runtime_state import InteractionKind, PermissionMode, RunStatus, RuntimeState
 from services.context.message_store import MessageStore
 from services.model.stream import ModelStreamEvent
 from services.permissions import PermissionPolicy, PermissionResponse, SessionPermissionStore
@@ -69,7 +69,7 @@ def test_full_access_survives_new_session_reset() -> None:
 
 def test_permissions_mode_command_switches_normal_and_full_access() -> None:
     state = RuntimeState()
-    runtime = SimpleNamespace(state=state)
+    runtime = SimpleNamespace(state=state, persist_session_state=lambda: None)
 
     _permissions(
         runtime,
@@ -230,7 +230,7 @@ def test_ask_user_question_marks_runtime_suspended_while_waiting() -> None:
     assert json.loads(result.content)["status"] == "answered"
 
 
-def test_ctrl_c_cancel_creates_user_interrupt_checkpoint() -> None:
+def test_ctrl_c_cancel_is_cancelled_not_hitl() -> None:
     state = RuntimeState()
     runtime = SimpleNamespace(state=state)
     session = StreamingSession(runtime=runtime)
@@ -246,8 +246,8 @@ def test_ctrl_c_cancel_creates_user_interrupt_checkpoint() -> None:
 
     assert session.cancelled is True
     assert app.exited is True
-    assert state.interaction is not None
-    assert state.interaction.kind == InteractionKind.USER_INTERRUPT
+    assert state.status == RunStatus.CANCELLED
+    assert state.interaction is None
 
 
 def test_exit_plan_mode_creates_plan_review_checkpoint(tmp_path: Path) -> None:

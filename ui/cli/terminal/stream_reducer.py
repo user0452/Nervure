@@ -617,6 +617,11 @@ def reduce_stream_event(state: CliStreamUiState, event: "AgentEvent") -> None:
                 state.assistant_committed = True
             state.streaming_text = ""
         state.turn_completed = True
+        if getattr(event, "metadata", {}).get("status") == "partial":
+            state.error_text = getattr(event, "metadata", {}).get(
+                "notice",
+                "Partial response preserved after truncation recovery was exhausted.",
+            )
         _set_mode(state, StreamMode.COMPLETED)
         return
 

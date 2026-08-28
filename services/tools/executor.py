@@ -137,7 +137,14 @@ class RegistryToolExecutor:
     def file_state_cache(self) -> FileStateCache:
         return self._file_state_cache
 
-    def _create_checkpoint_if_needed(self, ready: _ReadyToolCall) -> None:
+    @property
+    def checkpoint_store(self) -> CheckpointStore | None:
+        return self._checkpoint_store
+
+    def _create_checkpoint_if_needed(
+        self,
+        ready: _ReadyToolCall,
+    ) -> ToolExecutionResult | None:
         """Snapshot direct file mutation targets after safety preflight.
 
         This runs after guard/permission approval and immediately before the
@@ -146,7 +153,7 @@ class RegistryToolExecutor:
         """
 
         if self._checkpoint_store is None or not ready.classification.modifies_filesystem:
-            return
+            return None
         workspace = ready.runtime.state.metadata.get("workspace")
         workspace_path = Path(workspace) if isinstance(workspace, str) else Path.cwd()
         paths = tuple(
@@ -155,21 +162,32 @@ class RegistryToolExecutor:
             if target.kind == "file" and target.operation in {"write", "delete"}
         )
         if not paths:
-            return
+            return None
         try:
+            checkpoint_session_id = ready.runtime.state.metadata.get(
+                "checkpoint_session_id"
+            )
             checkpoint = self._checkpoint_store.create(
-                session_id=ready.runtime.state.session_id,
+                session_id=(
+                    checkpoint_session_id
+                    if isinstance(checkpoint_session_id, str)
+                    and checkpoint_session_id
+                    else ready.runtime.state.session_id
+                ),
                 tool_call_id=ready.tool_call.id,
                 tool_name=ready.descriptor.name,
                 paths=paths,
             )
         except Exception as exc:
-            # Checkpoint failure must never crash the tool lifecycle. It is
-            # observable so users can distinguish mutation from rollback proof.
             self._trace_recorder.event("checkpoint_failed", {"tool_name": ready.descriptor.name, "tool_call_id": ready.tool_call.id, "error_type": type(exc).__name__})
-            return
+            return _error_result(
+                ready.tool_call,
+                "checkpoint_creation_failed",
+                f"Could not create a rollback checkpoint before mutation: {exc}",
+            )
         ready.runtime.state.metadata.setdefault("checkpoints", []).append(checkpoint.id)
         self._trace_recorder.event("checkpoint_created", {"checkpoint_id": checkpoint.id, "tool_name": checkpoint.tool_name, "tool_call_id": checkpoint.tool_call_id, "file_count": len(checkpoint.files)})
+        return None
 
     async def execute(
         self,
@@ -375,7 +393,9 @@ class RegistryToolExecutor:
             )
 
     async def _run_handler_async(self, ready: _ReadyToolCall) -> _HandlerOutcome:
-        self._create_checkpoint_if_needed(ready)
+        checkpoint_error = self._create_checkpoint_if_needed(ready)
+        if checkpoint_error is not None:
+            return _HandlerOutcome(ready=ready, result=checkpoint_error)
         span_attributes = self._tool_span_attributes(ready)
         if inspect.iscoroutinefunction(ready.descriptor.handler):
             with self._trace_recorder.span(

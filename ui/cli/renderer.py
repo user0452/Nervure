@@ -166,13 +166,37 @@ def render_clear(old_session_id: str, new_session_id: str) -> Text:
     )
 
 
-def render_resume(session_id: str, messages_path: Path, workspace: Path) -> Text:
+def render_resume(
+    session_id: str,
+    messages_path: Path,
+    workspace: Path,
+    *,
+    classification: str = "SAFE_RESUME",
+    reasons: tuple[str, ...] = (),
+) -> Text:
+    detail = {
+        "SAFE_RESUME": "Transcript and execution context were validated.",
+        "STALE_CONTEXT": (
+            "Transcript restored; instructions, tools, model, or permissions changed, "
+            "so current configuration will be used."
+        ),
+        "WORKSPACE_DIVERGED": (
+            "Transcript restored, but the workspace diverged. Cached file state was "
+            "invalidated; re-read affected files before writing."
+        ),
+    }.get(classification, "Transcript restored.")
+    reason_text = f" Reasons: {'; '.join(reasons)}." if reasons else ""
     return Text(
         (
             f"{SYMBOLS.success} Restored session {session_id} from "
-            f"{display_path(messages_path, workspace)}."
+            f"{display_path(messages_path, workspace)}.\n{classification}: "
+            f"{detail}{reason_text}"
         ),
-        style="nervure.success",
+        style=(
+            "nervure.success"
+            if classification == "SAFE_RESUME"
+            else "nervure.warning"
+        ),
     )
 
 

@@ -16,6 +16,10 @@ from services.attachments import AttachmentCollector, AttachmentContextPreparer
 from services.background_tasks import BackgroundTaskManager
 from services.context.message_store import MessageStore
 from services.context.current_model_context import CurrentModelContext
+from services.context.session_state import (
+    SessionStateStore,
+    capture_session_validation_metadata,
+)
 from services.compaction import (
     ContextCompactionService,
 )
@@ -99,6 +103,27 @@ class CliRuntime:
     plan_store: PlanStore | None = None
     user_question_prompter: UserQuestionPrompter | None = None
     checkpoint_store: CheckpointStore | None = None
+    session_state_store: SessionStateStore | None = None
+    session_state_ref: dict[str, Any] | None = None
+
+    def persist_session_state(
+        self,
+        *,
+        extra_paths: tuple[str | Path, ...] = (),
+    ) -> None:
+        if self.session_state_store is None:
+            return
+        self.session_state_store.save(
+            capture_session_validation_metadata(
+                workspace=self.workspace,
+                state=self.state,
+                registry=self.registry,
+                provider_label=self.provider_label,
+                model=self.model,
+                instruction_memory_loader=self.instruction_memory_loader,
+                extra_paths=extra_paths,
+            )
+        )
 
     def with_session(
         self,
@@ -134,7 +159,6 @@ class CliRuntime:
                 workspace=self.workspace,
                 reader=attachment_collector.reader,
                 file_state_cache=file_state_cache,
-                checkpoint_store=self.checkpoint_store,
                 shared_sources=attachment_collector.shared_sources,
             )
         context_engine = ContextEngine(
@@ -158,6 +182,7 @@ class CliRuntime:
                 and self.memory_selector is not None
                 else self.compaction_service
             ),
+            final_context_budget_manager=self.compaction_service,
         )
         loop = AgentLoop(
             state=state,
@@ -175,7 +200,7 @@ class CliRuntime:
             self.permission_store.clear()
         if self.mcp_manager is not None:
             state.metadata["mcp_server_instructions"] = self.mcp_manager.snapshot().instructions
-        return replace(
+        updated = replace(
             self,
             state=state,
             message_store=message_store,
@@ -184,7 +209,13 @@ class CliRuntime:
             plan_store=self.plan_store,
             user_question_prompter=self.user_question_prompter,
             checkpoint_store=self.checkpoint_store,
+            session_state_store=SessionStateStore(
+                message_store.transcript_store.session_dir
+            ),
         )
+        if self.session_state_ref is not None:
+            self.session_state_ref["runtime"] = updated
+        return updated
 
     def with_model_config(self) -> "CliRuntime":
         """Reload `.env` provider settings while preserving the active session."""
@@ -217,6 +248,7 @@ class CliRuntime:
                 permission_policy=self.permission_policy,
                 permission_prompter=self.permission_prompter,
                 trace_recorder=self.trace_recorder,
+                checkpoint_store=self.checkpoint_store,
             )
             if self.subagent_runner_ref is not None:
                 self.subagent_runner_ref["runner"] = subagent_runner
@@ -269,6 +301,7 @@ class CliRuntime:
                 if self.long_term_memory_store is not None
                 else self.compaction_service
             ),
+            final_context_budget_manager=self.compaction_service,
         )
 
         result_store = ToolResultStorage(self.message_store.transcript_store.session_dir)
@@ -304,7 +337,7 @@ class CliRuntime:
             compaction_service=self.compaction_service,
             error_log_recorder=self.error_log_recorder,
         )
-        return replace(
+        updated = replace(
             self,
             registry=registry,
             loop=loop,
@@ -320,6 +353,10 @@ class CliRuntime:
             user_question_prompter=self.user_question_prompter,
             configured=True,
         )
+        if self.session_state_ref is not None:
+            self.session_state_ref["runtime"] = updated
+        updated.persist_session_state()
+        return updated
 
 
 @dataclass(frozen=True)

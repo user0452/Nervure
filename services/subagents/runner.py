@@ -25,6 +25,7 @@ from services.tools.executor import RegistryToolExecutor
 from services.tools.registry import ToolRegistry
 from services.tools.types import ToolDescriptor
 from services.skills import SkillCommand
+from services.checkpoints import CheckpointStore
 
 
 class SubagentRunner:
@@ -41,6 +42,7 @@ class SubagentRunner:
         permission_policy: PermissionPolicy,
         permission_prompter: PermissionPrompter | None,
         trace_recorder: TraceRecorder,
+        checkpoint_store: CheckpointStore | None = None,
     ) -> None:
         self._workspace = workspace
         self._transcript_root = transcript_root
@@ -52,6 +54,11 @@ class SubagentRunner:
         self._permission_policy = permission_policy
         self._permission_prompter = permission_prompter
         self._trace_recorder = trace_recorder
+        self._checkpoint_store = checkpoint_store
+
+    @property
+    def checkpoint_store(self) -> CheckpointStore | None:
+        return self._checkpoint_store
 
     def bind_parent_message_store(self, message_store: MessageStore) -> None:
         """Rebind fork source messages after CLI resume or session clear."""
@@ -75,6 +82,8 @@ class SubagentRunner:
         child_state = RuntimeState(
             max_turns=_request_max_turns(request) or definition.max_turns or 20
         )
+        child_state.metadata["workspace"] = str(self._workspace)
+        child_state.metadata["checkpoint_session_id"] = request.parent_session_id
         if request.profile:
             child_state.metadata["agent_profile"] = request.profile
             self._trace_recorder.event("agent_profile_selected", {"profile": request.profile, "purpose": definition.when_to_use})
@@ -154,6 +163,7 @@ class SubagentRunner:
                 else self._permission_prompter
             ),
             trace_recorder=self._trace_recorder,
+            checkpoint_store=self._checkpoint_store,
         )
         loop = AgentLoop(
             state=child_state,
@@ -200,6 +210,8 @@ class SubagentRunner:
             metadata={"purpose": "skill", "skill_name": skill.name},
         )
         child_state = RuntimeState(max_turns=definition.max_turns or 20)
+        child_state.metadata["workspace"] = str(self._workspace)
+        child_state.metadata["checkpoint_session_id"] = parent_session_id
         _copy_shared_runtime_metadata(request, child_state)
         child_state.metadata["hidden_tools"] = {"agent", "skill"}
         child_store = MessageStore.ephemeral(session_id=child_state.session_id)
@@ -223,6 +235,7 @@ class SubagentRunner:
             permission_policy=permission_policy,
             permission_prompter=self._permission_prompter,
             trace_recorder=self._trace_recorder,
+            checkpoint_store=self._checkpoint_store,
         )
         loop = AgentLoop(
             state=child_state,

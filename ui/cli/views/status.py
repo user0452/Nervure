@@ -38,6 +38,7 @@ def render_status(runtime: CliRuntime) -> Group:
     table.add_row("session", runtime.state.session_id)
     table.add_row("provider", runtime.provider_label)
     table.add_row("model", runtime.model)
+    table.add_row("run status", runtime.state.status.value)
     table.add_row("permission mode", runtime.state.permission_mode.value)
     table.add_row(
         "hitl",

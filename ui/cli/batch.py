@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 
 from services.model.types import ProviderError
+from services.errors import actionable_error_message
 from ui.cli import renderer
 from ui.cli.app import build_runtime
 from ui.cli.input import read_batch_line
@@ -45,6 +46,7 @@ async def run_batch_async(workspace: Path) -> int:
             )
         saw_delta = False
         final_text = ""
+        final_status = ""
         async for event in runtime.loop.stream(line, attachments=attachments):
             if event.type == "assistant_delta":
                 if not saw_delta:
@@ -60,10 +62,17 @@ async def run_batch_async(workspace: Path) -> int:
                 )
             elif event.type == "completed":
                 final_text = event.text
+                final_status = str(event.metadata.get("status") or "")
         if saw_delta:
             print()
         else:
             print(renderer.render_assistant(final_text))
+        if final_status == "partial":
+            renderer.print_renderable(
+                renderer.render_error(
+                    "Generation remained truncated after recovery; partial response was preserved."
+                )
+            )
     except Exception as exc:
         runtime.error_log_recorder.record_error(
             exc,
@@ -71,7 +80,7 @@ async def run_batch_async(workspace: Path) -> int:
             attributes={"turn_count": runtime.state.turn_count},
         )
         runtime.error_log_recorder.flush()
-        renderer.print_renderable(renderer.render_error(str(exc)))
+        renderer.print_renderable(renderer.render_error(actionable_error_message(exc)))
         await _shutdown(runtime)
         return 1
 
@@ -80,6 +89,7 @@ async def run_batch_async(workspace: Path) -> int:
 
 
 async def _shutdown(runtime: CliRuntime) -> None:
+    runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     runtime.trace_recorder.flush()
     runtime.error_log_recorder.flush()

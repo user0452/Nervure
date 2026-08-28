@@ -521,12 +521,10 @@ class StreamingSession:
 
     def _cancel_turn(self, event) -> None:  # type: ignore[no-untyped-def]
         if self._runtime is not None:
-            from core.runtime_state import InteractionKind
+            from core.runtime_state import RunStatus
 
-            self._runtime.state.suspend(
-                InteractionKind.USER_INTERRUPT,
-                payload={"reason": "user_cancelled_turn"},
-            )
+            self._runtime.state.status = RunStatus.CANCELLED
+            self._runtime.state.resume()
         self._cancel.set()
         event.app.exit()
 

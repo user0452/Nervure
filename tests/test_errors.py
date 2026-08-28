@@ -5,6 +5,7 @@ import errno
 
 from services.errors import (
     AbortError,
+    RetryExhaustedError,
     ErrorCategory,
     NervureError,
     OneCodeError,
@@ -16,6 +17,7 @@ from services.errors import (
     nervure_error_details,
     short_error_stack,
     to_error,
+    actionable_error_message,
 )
 from services.model.types import ProviderError
 
@@ -108,3 +110,15 @@ def test_short_error_stack_limits_traceback_frames() -> None:
     assert "RuntimeError: boom" in stack
     assert "second" in stack
     assert "first" not in stack
+
+
+def test_retry_exhaustion_message_has_actionable_rate_limit_next_step() -> None:
+    error = RetryExhaustedError(
+        "exhausted",
+        metadata={"error_type": "rate_limit_error"},
+    )
+
+    message = actionable_error_message(error)
+
+    assert "rate limit" in message
+    assert "retry" in message

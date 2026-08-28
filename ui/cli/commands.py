@@ -18,6 +18,7 @@ from services.plans import (
     exit_plan_mode,
 )
 from services.tasks import TaskStoreError, resolve_task_list_id
+from services.checkpoints import CheckpointRestoreError
 from infrastructure.filesystem.nervure_paths import session_roots, sessions_dir
 from services.permissions import (
     PermissionBehavior,
@@ -75,6 +76,7 @@ def command_registry() -> tuple[CommandSpec, ...]:
         CommandSpec("tasks", "Show durable and background tasks.", _tasks),
         CommandSpec("mcp", "Show MCP servers and discovered tools.", _mcp),
         CommandSpec("compact", "Compact the active session context.", _compact, "[focus]"),
+        CommandSpec("undo", "Restore the latest file-mutation checkpoint.", _undo),
         CommandSpec(
             "plan",
             "Enter plan mode, show the current plan, or open the plan file.",
@@ -192,6 +194,7 @@ def _permissions(runtime: CliRuntime, invocation: CommandInvocation) -> CommandR
         else:
             runtime.state.permission_mode = selected_mode
             message = f"Permission mode: {selected_mode.value}."
+        runtime.persist_session_state()
         return CommandResult(renderable=renderer.render_text(message))
 
     parsed = _parse_permissions_args(invocation.arg_text)
@@ -238,6 +241,7 @@ def _permissions(runtime: CliRuntime, invocation: CommandInvocation) -> CommandR
         project_store.apply_update(update)
     except Exception as exc:
         return CommandResult(renderable=renderer.render_error(str(exc)))
+    runtime.persist_session_state()
     return CommandResult(renderable=_render_permission_update(update))
 
 
@@ -425,6 +429,58 @@ def _compact(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResul
     return CommandResult(renderable=renderer.render_compact(result, runtime))
 
 
+def _undo(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
+    _ = invocation
+    if runtime.checkpoint_store is None or runtime.guard is None:
+        return CommandResult(
+            renderable=renderer.render_error("Undo is not enabled for this runtime.")
+        )
+    checkpoint = runtime.checkpoint_store.latest(runtime.state.session_id)
+    if checkpoint is None:
+        return CommandResult(
+            renderable=renderer.render_error(
+                "No valid checkpoint exists for the current session."
+            )
+        )
+    try:
+        paths = runtime.checkpoint_store.restore_paths(
+            checkpoint.id,
+            session_id=runtime.state.session_id,
+        )
+        blocked = tuple(
+            policy
+            for path in paths
+            if (policy := runtime.guard.check_write_target(path)).action != "allow"
+        )
+        if blocked:
+            return CommandResult(
+                renderable=renderer.render_error(
+                    "Undo refused because a checkpoint path is outside the current "
+                    f"workspace: {blocked[0].normalized_path}"
+                )
+            )
+        restored = runtime.checkpoint_store.restore(
+            checkpoint.id,
+            session_id=runtime.state.session_id,
+            confirmed=True,
+        )
+    except CheckpointRestoreError as exc:
+        return CommandResult(renderable=renderer.render_error(str(exc)))
+
+    file_state_cache = getattr(runtime.tool_executor, "file_state_cache", None)
+    if file_state_cache is not None:
+        for path in paths:
+            file_state_cache.remove(path)
+    runtime.persist_session_state(extra_paths=tuple(paths))
+    rendered_paths = "\n".join(f"- {path}" for path in paths)
+    return CommandResult(
+        renderable=renderer.render_text(
+            f"Restored checkpoint {restored.id} ({restored.tool_name}).\n"
+            f"Files restored:\n{rendered_paths}"
+        )
+    )
+
+
 def _tasks(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
     task_list_id: str | None = None
@@ -461,6 +517,7 @@ def _tasks(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
 def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
     old_session_id = runtime.state.session_id
+    runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     new_session_id = runtime.state.start_new_session()
     runtime.message_store.clear_for_new_session(new_session_id)
@@ -468,6 +525,7 @@ def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
         state=runtime.state,
         message_store=runtime.message_store,
     )
+    cleared.persist_session_state()
     return CommandResult(
         runtime=cleared,
         renderable=renderer.render_clear(old_session_id, new_session_id),
@@ -497,6 +555,10 @@ def _resume(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult
             resumed.state.session_id,
             resumed.message_store.transcript_store.messages_path,
             resumed.workspace,
+            classification=str(
+                resumed.state.metadata.get("resume_classification", "SAFE_RESUME")
+            ),
+            reasons=tuple(resumed.state.metadata.get("resume_reasons", ())),
         ),
         presentation="inline",
         replay_messages=resumed.message_store.current_messages(),
@@ -511,6 +573,7 @@ def _connect(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResul
 
 def _exit(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
+    runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     runtime.trace_recorder.flush()
     runtime.error_log_recorder.flush()

@@ -137,6 +137,8 @@ turn 完成后 Activity 与 assistant 文本提交到 persistent transcript，�
 - `interaction="connect"` → `terminal.connect_flow.run_connect_flow` + `write_provider_env` + `with_model_config`
 - `should_exit` → flush + 退出循环
 
+`resume.py` 除 transcript 重放外，还读取 session-local `session_state.json`。workspace / Git HEAD / 已触及文件哈希不一致时返回 `WORKSPACE_DIVERGED` 并丢弃旧 `FileStateCache`；指令、工具/模型配置或权限模式不一致时返回 `STALE_CONTEXT`；全部匹配才是 `SAFE_RESUME`。`/undo` 仅选择当前 session 按 manifest 时间排序的最新有效 checkpoint，恢复前重新经过当前 sandbox guard，恢复后使对应文件缓存失效。
+
 ## 核心数据流
 
 ```mermaid

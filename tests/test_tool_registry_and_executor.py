@@ -777,6 +777,35 @@ def test_executor_returns_permission_denied_when_user_denies(tmp_path) -> None:
     assert state.metadata.get("files_read") is None
 
 
+def test_checkpoint_failure_blocks_file_mutation(tmp_path) -> None:
+    class BrokenCheckpointStore:
+        def create(self, **kwargs):
+            raise OSError("checkpoint disk unavailable")
+
+    state = RuntimeState(metadata={"workspace": str(tmp_path)})
+    executor = RegistryToolExecutor(
+        ToolRegistry([write_file_descriptor()]),
+        guard=SandboxGuard(SandboxBoundary(cwd=tmp_path)),
+        checkpoint_store=BrokenCheckpointStore(),  # type: ignore[arg-type]
+    )
+
+    result = execute_results(
+        executor,
+        (
+            ToolCall(
+                id="call-write",
+                name="write_file",
+                input={"file_path": "blocked.txt", "content": "no"},
+            ),
+        ),
+        state,
+    )[0]
+
+    assert result.is_error is True
+    assert json.loads(result.content)["error"] == "checkpoint_creation_failed"
+    assert not (tmp_path / "blocked.txt").exists()
+
+
 def test_session_allow_skips_later_prompt_for_same_directory(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

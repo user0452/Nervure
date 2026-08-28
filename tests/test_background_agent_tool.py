@@ -33,6 +33,8 @@ def test_background_agent_returns_immediately_and_notifies(tmp_path: Path) -> No
     async def run():
         runner = StubRunner()
         manager = BackgroundTaskManager(workspace=tmp_path)
+        terminal_notices: list[str] = []
+        manager.bind_terminal_notifier(terminal_notices.append)
         executor = RegistryToolExecutor(
             ToolRegistry([agent_descriptor(runner, manager)])
         )
@@ -43,7 +45,11 @@ def test_background_agent_returns_immediately_and_notifies(tmp_path: Path) -> No
                 ToolCall(
                     id="call-agent",
                     name="agent",
-                    input={"prompt": "work", "run_in_background": True},
+                    input={
+                        "prompt": "work",
+                        "profile": "ExploreAgent",
+                        "run_in_background": True,
+                    },
                 ),
             ),
             state,
@@ -51,14 +57,16 @@ def test_background_agent_returns_immediately_and_notifies(tmp_path: Path) -> No
             if update.result is not None:
                 results.append(update.result)
         await asyncio.sleep(0)
-        return runner, manager, state, results[0]
+        return runner, manager, state, results[0], terminal_notices
 
-    runner, manager, state, result = asyncio.run(run())
+    runner, manager, state, result, terminal_notices = asyncio.run(run())
 
     payload = json.loads(result.content)
     assert payload["task_id"].startswith("a_")
     assert payload["status"] == "running"
     assert runner.requests[0].metadata["background_task_id"] == payload["task_id"]
+    assert runner.requests[0].profile == "ExploreAgent"
+    assert terminal_notices and payload["task_id"] in terminal_notices[0]
     notifications = manager.drain_notifications(state)
     assert len(notifications) == 1
     assert notifications[0]["task_id"] == payload["task_id"]

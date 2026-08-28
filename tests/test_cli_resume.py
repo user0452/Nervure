@@ -6,6 +6,11 @@ from pathlib import Path
 from core.runtime_state import RuntimeState
 from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
 from services.context.message_store import MessageStore
+from services.context.session_state import (
+    ResumeClassification,
+    SessionStateStore,
+    capture_session_validation_metadata,
+)
 from services.tools.executor import ToolExecutionUpdate
 from services.tools.file_state import FileStateCache
 from services.tools.registry import ToolRegistry
@@ -97,6 +102,19 @@ def write_transcript(tmp_path: Path, session_id: str) -> Path:
     )
     message_store.append_assistant({"content": "restored answer"})
     message_store.flush_transcript()
+    state.metadata["workspace"] = str(tmp_path)
+    state.metadata["files_read"] = {str(target)}
+    registry = ToolRegistry([read_file_descriptor(), edit_file_descriptor()])
+    SessionStateStore(message_store.transcript_store.session_dir).save(
+        capture_session_validation_metadata(
+            workspace=tmp_path,
+            state=state,
+            registry=registry,
+            provider_label="TestProvider",
+            model="test-model",
+            instruction_memory_loader=None,
+        )
+    )
     return session_messages_path(tmp_path, session_id)
 
 
@@ -173,12 +191,51 @@ def test_resume_command_replaces_runtime_and_restores_messages(
     assert "# Behavior Rules\n" in snapshot.system_prompt
     assert "# Tool: read_file\n" in snapshot.system_prompt
     assert target in result.runtime.state.metadata["files_read"]
+    assert (
+        result.runtime.state.metadata["resume_classification"]
+        == ResumeClassification.SAFE_RESUME.value
+    )
     # The renderable is now only the resume notice, not the history body.
     output = strip_ansi(renderer.render_to_text(result.renderable))
     assert "Restored session session-old" in output
     assert "Session History" not in output
     assert "[read_file call_read ok]" not in output
     assert "restored answer" not in output
+
+
+def test_resume_marks_stale_context_when_model_configuration_changed(
+    tmp_path: Path,
+) -> None:
+    write_transcript(tmp_path, "session-old")
+    runtime = make_runtime(tmp_path)
+    runtime.model = "new-model"
+
+    result = dispatch_command(runtime, "/resume session-old")
+
+    assert result.runtime is not None
+    assert (
+        result.runtime.state.metadata["resume_classification"]
+        == ResumeClassification.STALE_CONTEXT.value
+    )
+    assert str(tmp_path / "restored.txt") in result.runtime.state.metadata["files_read"]
+
+
+def test_resume_invalidates_file_state_when_workspace_diverged(tmp_path: Path) -> None:
+    write_transcript(tmp_path, "session-old")
+    target = tmp_path / "restored.txt"
+    target.write_text("changed after session\n", encoding="utf-8")
+    runtime = make_runtime(tmp_path)
+
+    result = dispatch_command(runtime, "/resume session-old")
+
+    assert result.runtime is not None
+    assert (
+        result.runtime.state.metadata["resume_classification"]
+        == ResumeClassification.WORKSPACE_DIVERGED.value
+    )
+    assert "files_read" not in result.runtime.state.metadata
+    assert result.runtime.tool_executor.file_state_cache.get(target) is None
+    assert result.runtime.message_store.current_messages()[0]["content"] == "restore this"
 
 
 def test_resume_missing_target_keeps_current_runtime(

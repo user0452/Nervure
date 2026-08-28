@@ -176,6 +176,50 @@ class ContextCompactionService:
             )
             return None
 
+    async def ensure_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> bool:
+        """Compact raw history when the fully projected request is over budget."""
+
+        projected_tokens = estimate_snapshot_tokens(snapshot)
+        state.metadata["final_projected_context_tokens"] = projected_tokens
+        self._trace_recorder.event(
+            "final_context_budget",
+            {
+                "projected_tokens": projected_tokens,
+                "threshold": self.config.auto_compact_threshold_tokens,
+            },
+        )
+        if (
+            projected_tokens < self.config.auto_compact_threshold_tokens
+            or state.metadata.get("query_source") == "compact"
+            or _auto_compact_failures(state)
+            >= self.config.max_consecutive_auto_compact_failures
+        ):
+            return False
+        messages = self._active_messages()
+        try:
+            await self._full_compact(
+                messages,
+                state,
+                trigger=CompactionTrigger.AUTO_FULL,
+                parent_snapshot=snapshot,
+            )
+        except Exception as exc:
+            _increment_auto_compact_failures(state)
+            await self._compact_failed(
+                state,
+                trigger=CompactionTrigger.AUTO_FULL,
+                error=exc,
+                token_before=projected_tokens,
+                message_count=len(messages),
+            )
+            return False
+        _reset_auto_compact_failures(state)
+        return True
+
     async def manual_compact(
         self,
         state: RuntimeState,
@@ -236,6 +280,7 @@ class ContextCompactionService:
         *,
         trigger: CompactionTrigger,
         focus: str | None = None,
+        parent_snapshot: ContextSnapshot | None = None,
     ) -> CompactionResult:
         started = perf_counter()
         token_before = estimate_messages_tokens(messages)
@@ -251,7 +296,8 @@ class ContextCompactionService:
             focus=focus,
             extra_instructions=hook_metadata.get("summary_instructions"),
         )
-        parent_snapshot = await self._compact_parent_snapshot(messages, state)
+        if parent_snapshot is None:
+            parent_snapshot = await self._compact_parent_snapshot(messages, state)
         compact_snapshot = _append_compact_instruction(
             parent_snapshot,
             prompt,

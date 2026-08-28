@@ -32,6 +32,13 @@ class BackgroundTaskManager:
         self._trace_recorder = trace_recorder or TraceRecorder.noop()
         self._lock = threading.RLock()
         self._tasks: dict[str, BackgroundTaskState] = {}
+        self._terminal_notifier: Callable[[str], None] | None = None
+
+    def bind_terminal_notifier(
+        self,
+        notifier: Callable[[str], None] | None,
+    ) -> None:
+        self._terminal_notifier = notifier
 
     def list_tasks(self) -> tuple[BackgroundTaskState, ...]:
         with self._lock:
@@ -260,6 +267,11 @@ class BackgroundTaskManager:
             "background_task_completed",
             {"task_id": task_id, "task_type": updated.type, "status": status},
         )
+        if notify and self._terminal_notifier is not None:
+            terminal_status = "cancelled" if status == "killed" else status
+            self._terminal_notifier(
+                f"Background task {task_id} {terminal_status}: {summary}"
+            )
         return updated
 
     def _monitor_process(

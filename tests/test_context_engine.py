@@ -9,6 +9,7 @@ from core.runtime_state import RuntimeState
 from core.transitions import TransitionReason
 from services.context.message_store import MessageStore
 from services.context.snapshot import PreparedContext
+from services.context.snapshot import ContextSnapshot
 from services.tools.types import ToolExecutionResult
 
 
@@ -50,6 +51,19 @@ class MetadataPreparer:
             usage_hints={"token_after": 123, "compaction_trigger": "micro"},
             transcript_refs=("tool-results/call-1.txt",),
         )
+
+
+class CompactOnce:
+    def __init__(self) -> None:
+        self.snapshots: list[ContextSnapshot] = []
+
+    async def ensure_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> bool:
+        self.snapshots.append(snapshot)
+        return len(self.snapshots) == 1
 
 
 def test_context_engine_rebuilds_snapshot_from_current_messages(
@@ -170,3 +184,32 @@ def test_context_engine_projects_safe_model_request_overrides(tmp_path: Path) ->
     assert snapshot.usage_hints["request_overrides"] == {
         "max_output_tokens": 64000
     }
+
+
+def test_context_engine_checks_complete_projection_then_rebuilds_once(
+    tmp_path: Path,
+) -> None:
+    state = RuntimeState()
+    message_store = MessageStore(
+        transcript_root=tmp_path / ".onecode",
+        session_id=state.session_id,
+        flush_interval_seconds=60,
+    )
+    message_store.append_user("original")
+    manager = CompactOnce()
+    preparer = ReplacingPreparer()
+    engine = ContextEngine(
+        message_store,
+        prompt_assembler=FakePromptAssembler(),
+        tool_schema_provider=FakeToolSchemaProvider(),
+        context_preparer=preparer,
+        final_context_budget_manager=manager,
+    )
+
+    snapshot = asyncio.run(engine.build_for_model(state))
+
+    assert len(manager.snapshots) == 1
+    assert manager.snapshots[0].messages[-1]["content"] == "prepared"
+    assert manager.snapshots[0].system_prompt.startswith("session=")
+    assert manager.snapshots[0].tool_schemas[0]["name"] == "fake_tool"
+    assert snapshot.messages[-1]["content"] == "prepared"

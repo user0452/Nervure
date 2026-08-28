@@ -247,6 +247,27 @@ def nervure_error_details(value: object) -> ErrorDetails:
     return _details(error, category, retryable=retryable, metadata=metadata)
 
 
+def actionable_error_message(value: object) -> str:
+    """Return a concise user-facing failure with a concrete next action."""
+
+    details = nervure_error_details(value)
+    original_type = details.metadata.get("error_type")
+    category = _provider_error_category(str(original_type)) or details.category
+    if category == ErrorCategory.ABORT:
+        return "Turn cancelled. No further tools were run."
+    if category == ErrorCategory.RATE_LIMIT:
+        return "Provider rate limit persisted after retries. Wait briefly and retry, or switch provider/model."
+    if category == ErrorCategory.NETWORK and (
+        details.error_type == "timeout_error" or original_type == "timeout_error"
+    ):
+        return "Provider request timed out after retries. Retry the turn or use a provider with a longer timeout."
+    if category == ErrorCategory.CONTEXT_LIMIT:
+        return "Context is still over the provider limit after compaction. Start a fresh session or reduce the requested scope."
+    if category == ErrorCategory.PERMISSION:
+        return "The operation was blocked by current permissions. Review /permissions, then retry if the target is intended."
+    return details.safe_message
+
+
 # Backward-compatible function alias for older integrations.
 onecode_error_details = nervure_error_details
 

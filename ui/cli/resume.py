@@ -11,6 +11,13 @@ from typing import Any
 from core.runtime_state import RuntimeState
 from services.context.message_store import MessageStore
 from services.context.transcript import JsonlTranscriptStore, VALID_MESSAGE_ROLES
+from services.context.session_state import (
+    ResumeClassification,
+    SessionStateStore,
+    capture_session_validation_metadata,
+    stored_file_paths,
+    validate_resume,
+)
 from infrastructure.filesystem.nervure_paths import session_roots
 from services.tools.file_state import FileStateCache
 from ui.cli.types import CliRuntime
@@ -130,12 +137,45 @@ def restore_runtime_from_target(runtime: CliRuntime, target: str) -> CliRuntime:
             f"Transcript has no loadable messages: {transcript_store.messages_path}"
         )
     runtime.message_store.flush_transcript()
-    state = RuntimeState(max_turns=runtime.state.max_turns)
-    message_store = MessageStore.from_transcript(transcript_store, state)
-    file_state_cache = restore_session_state(
-        state,
-        message_store.current_messages(),
+    session_state_store = SessionStateStore(transcript_store.session_dir)
+    saved_validation = session_state_store.load()
+    saved_paths = stored_file_paths(saved_validation, runtime.workspace)
+    validation_state = RuntimeState(
+        max_turns=runtime.state.max_turns,
+        permission_mode=runtime.state.permission_mode,
+        metadata={
+            "workspace": str(runtime.workspace),
+            "files_read": {str(path) for path in saved_paths},
+        },
     )
+    current_validation = capture_session_validation_metadata(
+        workspace=runtime.workspace,
+        state=validation_state,
+        registry=runtime.registry,
+        provider_label=runtime.provider_label,
+        model=runtime.model,
+        instruction_memory_loader=runtime.instruction_memory_loader,
+        extra_paths=saved_paths,
+    )
+    validation = validate_resume(saved_validation, current_validation)
+    state = RuntimeState(
+        max_turns=runtime.state.max_turns,
+        permission_mode=runtime.state.permission_mode,
+    )
+    state.metadata["workspace"] = str(runtime.workspace)
+    state.metadata["resume_classification"] = validation.classification.value
+    state.metadata["resume_reasons"] = validation.reasons
+    message_store = MessageStore.from_transcript(transcript_store, state)
+    if validation.classification == ResumeClassification.WORKSPACE_DIVERGED:
+        file_state_cache = FileStateCache()
+        state.metadata["resume_files_to_reread"] = tuple(
+            str(path) for path in saved_paths
+        )
+    else:
+        file_state_cache = restore_session_state(
+            state,
+            message_store.current_messages(),
+        )
     return runtime.with_session(
         state=state,
         message_store=message_store,

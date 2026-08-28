@@ -33,6 +33,7 @@ from services.compaction import (
 )
 from services.checkpoints import CheckpointStore
 from services.context.current_model_context import CurrentModelContext
+from services.context.session_state import SessionStateStore
 from services.context.message_store import MessageStore
 from services.guard import SandboxBoundary, SandboxGuard
 from services.hooks import HookRegistry
@@ -390,7 +391,6 @@ def build_runtime(
         workspace=workspace,
         reader=attachment_reader,
         file_state_cache=file_state_cache,
-        checkpoint_store=checkpoint_store,
         shared_sources=(
             BackgroundTaskNotificationSource(background_task_manager),
         ),
@@ -416,6 +416,7 @@ def build_runtime(
                 trace_recorder=trace_recorder,
             )
         ),
+        final_context_budget_manager=compaction_service,
     )
     subagent_runner = SubagentRunner(
         workspace=workspace,
@@ -428,6 +429,7 @@ def build_runtime(
         permission_policy=permission_policy,
         permission_prompter=permission_prompter,
         trace_recorder=trace_recorder,
+        checkpoint_store=checkpoint_store,
     )
     runner_ref["runner"] = subagent_runner
     long_term_memory_extractor = LongTermMemoryExtractionService(
@@ -460,6 +462,7 @@ def build_runtime(
         error_log_recorder=error_log_recorder,
         result_store=result_store,
         file_state_cache=file_state_cache,
+        checkpoint_store=checkpoint_store,
     )
     loop = AgentLoop(
         state=state,
@@ -474,7 +477,8 @@ def build_runtime(
         error_log_recorder=error_log_recorder,
     )
     config = model_client.config
-    return CliRuntime(
+    session_state_ref: dict[str, object] = {}
+    runtime = CliRuntime(
         workspace=workspace,
         provider_config_path=provider_config_path,
         state=state,
@@ -511,7 +515,27 @@ def build_runtime(
         plan_store=plan_store,
         user_question_prompter=user_question_prompter,
         checkpoint_store=checkpoint_store,
+        session_state_store=SessionStateStore(
+            message_store.transcript_store.session_dir
+        ),
+        session_state_ref=session_state_ref,
     )
+    session_state_ref["runtime"] = runtime
+
+    def persist_session_state_after_tool(payload: dict[str, object]) -> None:
+        active_runtime = session_state_ref.get("runtime")
+        if not isinstance(active_runtime, CliRuntime):
+            return
+        result = payload.get("result")
+        metadata = getattr(result, "metadata", {})
+        path = metadata.get("path") if isinstance(metadata, dict) else None
+        active_runtime.persist_session_state(
+            extra_paths=(path,) if isinstance(path, str) and path else ()
+        )
+
+    hooks.register(HookEvent.POST_TOOL_USE, persist_session_state_after_tool)
+    runtime.persist_session_state()
+    return runtime
 
 
 def _prompt_for_project_mcp_trust(

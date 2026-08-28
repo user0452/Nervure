@@ -128,12 +128,15 @@ def _start_background_agent(
         )
     prompt = str(tool_input["prompt"])
     subagent_type = tool_input.get("subagent_type")
+    profile = tool_input.get("profile")
+    agent_identity = profile or subagent_type or "fork"
     metadata = _child_metadata(runtime, tool_input)
 
     async def run(task_id: str) -> dict[str, Any]:
         request = SubagentRequest(
             prompt=prompt,
             subagent_type=subagent_type,
+            profile=profile,
             parent_session_id=runtime.state.session_id,
             parent_tool_call_id=runtime.tool_call_id,
             metadata={
@@ -169,13 +172,14 @@ def _start_background_agent(
         }
 
     task = background_task_manager.start_agent(
-        description=_description(prompt, subagent_type),
+        description=_description(prompt, agent_identity),
         state=runtime.state,
         run=run,
         tool_use_id=runtime.tool_call_id,
         metadata={
             "prompt": prompt,
-            "agent_type": subagent_type or "fork",
+            "agent_type": agent_identity,
+            "profile": profile,
             "parent_session_id": runtime.state.session_id,
         },
     )
@@ -183,7 +187,7 @@ def _start_background_agent(
         "task_id": task.id,
         "task_type": task.type,
         "status": task.status,
-        "agent_type": subagent_type or "fork",
+        "agent_type": agent_identity,
         "output_file": task.output_file,
     }
     return ToolExecutionResult(

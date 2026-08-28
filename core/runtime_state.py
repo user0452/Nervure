@@ -25,6 +25,18 @@ class PermissionMode(StrEnum):
     PLAN = "plan"
 
 
+class RunStatus(StrEnum):
+    """Terminal and active outcomes for one runtime interaction."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    WAITING_USER = "waiting_user"
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class InteractionKind(StrEnum):
     """Human-in-the-loop suspension reasons understood by the runtime."""
 
@@ -73,6 +85,7 @@ class PlanState:
 
 @dataclass
 class RuntimeState:
+    status: RunStatus = RunStatus.IDLE
     usage: ModelUsage = field(default_factory=ModelUsage)
     turn_count: int = 0
     max_turns: int | None = None
@@ -166,6 +179,7 @@ class RuntimeState:
         self.has_escalated_max_output_tokens = False
         self.max_output_recovery_count = 0
         self.last_transition = None
+        self.status = RunStatus.IDLE
         self.permission_mode = next_permission_mode
         self.plan.reset()
         self.interaction = None

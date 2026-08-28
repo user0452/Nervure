@@ -30,7 +30,7 @@ Nervure treats the context sent to the model in each turn as an engineering arti
 All built-in capabilities and external extensions are connected via a unified **Tool Registry**. The registry defines the execution logic, permission boundaries, and error feedback contracts for tools. Tools execute in a controlled environment, and any exceptions are caught and converted into context feedback. Built-in tools cover files, commands, retrieval, attachments, background tasks, sub-agents, etc.; external capabilities are registered in the same way via **Skills** and **MCP**.
 
 ### Interruptible and Resumable State
-Runtime conversation records and tool invocation histories are independently persisted. After a long task is interrupted, it can resume execution from the breakpoint. All execution records are preserved as replayable trajectories, rather than just kept in memory.
+Runtime conversation records, tool invocation histories, and lightweight validation metadata are persisted independently. `/resume` always restores the transcript, but it reports `SAFE_RESUME` only when the workspace, Git HEAD, touched-file hashes, project instructions, tool/model configuration, and permission mode still match. Configuration changes produce `STALE_CONTEXT`; workspace changes produce `WORKSPACE_DIVERGED`, invalidate cached file state, and require affected files to be read again before writes. File-mutating tools create checkpoints before execution, and `/undo` restores the latest valid checkpoint for the current session.
 
 ### Observability and Analysis
 The system structures and records runtime **traces** and **error logs**: every decision, tool call, and state transition is documented, facilitating subsequent debugging, replay, and evaluation.

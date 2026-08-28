@@ -11,4 +11,5 @@ class TransitionReason(StrEnum):
     REACTIVE_COMPACT_RETRY = "reactive_compact_retry"
     MAX_OUTPUT_TOKENS_ESCALATE = "max_output_tokens_escalate"
     MAX_OUTPUT_TOKENS_RECOVERY = "max_output_tokens_recovery"
+    MAX_OUTPUT_TOKENS_RECOVERY_EXHAUSTED = "max_output_tokens_recovery_exhausted"
     STOP_HOOK_CONTINUE = "stop_hook_continue"

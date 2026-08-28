@@ -17,6 +17,10 @@ from services.mcp.types import McpConnectionSnapshot, McpDiscoveredTool, McpServ
 from services.permissions import PermissionPolicy, ProjectPermissionSettingsStore, SessionPermissionStore
 from services.tasks import TaskStore
 from services.tools.executor import ToolExecutionUpdate
+from services.tools.executor import RegistryToolExecutor
+from services.tools.file_state import FileStateCache
+from services.checkpoints import CheckpointStore
+from services.guard import SandboxBoundary, SandboxGuard
 from services.tools.registry import ToolRegistry
 from tools.edit_file import descriptor as edit_file_descriptor
 from tools.read_file import descriptor as read_file_descriptor
@@ -190,6 +194,7 @@ def test_visible_commands_are_productized_command_set() -> None:
         "tasks",
         "mcp",
         "compact",
+        "undo",
         "resume",
         "connect",
         "clear",
@@ -214,7 +219,39 @@ def test_removed_user_commands_are_unknown(tmp_path: Path) -> None:
         result, output = run_command(runtime, command)
         assert result.should_exit is False
         assert "Unknown command" in output
-        assert "Press Tab after /" in output
+    assert "Press Tab after /" in output
+
+
+def test_undo_restores_latest_checkpoint_and_invalidates_file_cache(
+    tmp_path: Path,
+) -> None:
+    runtime = make_runtime(tmp_path)
+    target = tmp_path / "note.txt"
+    target.write_text("before", encoding="utf-8")
+    checkpoint_store = CheckpointStore(tmp_path / ".nervure" / "checkpoints")
+    checkpoint_store.create(
+        session_id=runtime.state.session_id,
+        tool_call_id="write-1",
+        tool_name="write_file",
+        paths=(target,),
+    )
+    target.write_text("after", encoding="utf-8")
+    cache = FileStateCache()
+    cache.snapshot_path(target)
+    executor = RegistryToolExecutor(runtime.registry, file_state_cache=cache)
+    runtime = replace(
+        runtime,
+        tool_executor=executor,
+        checkpoint_store=checkpoint_store,
+        guard=SandboxGuard(SandboxBoundary(cwd=tmp_path)),
+    )
+
+    _result, output = run_command(runtime, "/undo")
+
+    assert target.read_text(encoding="utf-8") == "before"
+    assert cache.get(target) is None
+    assert "Files restored" in output
+    assert str(target) in output
 
 
 def test_banner_shows_only_product_workspace_and_model(tmp_path: Path) -> None:

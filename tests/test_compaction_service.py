@@ -41,6 +41,48 @@ def _prepare(
     return asyncio.run(service.prepare_for_model(messages, state))
 
 
+def test_final_budget_compacts_raw_transcript_not_synthetic_projection(tmp_path) -> None:
+    state = RuntimeState(session_id="session-final-budget")
+    message_store = MessageStore(
+        transcript_root=tmp_path / ".onecode",
+        session_id=state.session_id,
+        flush_interval_seconds=60,
+    )
+    message_store.append_user("raw user message")
+    model = FakeModelClient(
+        LLMResponse(
+            assistant_message={"role": "assistant", "content": "summary"},
+            final_text="summary",
+        )
+    )
+    service = ContextCompactionService(
+        config=CompactionConfig(
+            context_window_tokens=100,
+            recent_tail_min_tokens=0,
+            recent_tail_max_tokens=50,
+        ),
+        message_store=message_store,
+        model_client=model,
+    )
+    synthetic = {
+        "role": "user",
+        "content": "attachment " * 100,
+        "attachment": {"type": "file"},
+    }
+    snapshot = ContextSnapshot(
+        system_prompt="system",
+        messages=(*message_store.current_messages(), synthetic),
+        tool_schemas=({"name": "tool", "description": "schema " * 50},),
+    )
+
+    compacted = asyncio.run(service.ensure_final_context_budget(snapshot, state))
+
+    assert compacted is True
+    stored = message_store.current_messages()
+    assert all(message.get("attachment") != {"type": "file"} for message in stored)
+    assert any(message.get("metadata", {}).get("is_compact_summary") for message in stored)
+
+
 def test_prepare_for_model_persists_large_tool_results_before_projection(tmp_path) -> None:
     state = RuntimeState(session_id="session-compact")
     store = ToolResultStorage(tmp_path / ".onecode" / state.session_id)

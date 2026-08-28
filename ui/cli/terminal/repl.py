@@ -30,7 +30,8 @@ from typing import Awaitable, Callable
 from rich.console import Console
 from rich.text import Text
 
-from core.runtime_state import InteractionKind, RuntimeState
+from core.runtime_state import InteractionKind, RunStatus, RuntimeState
+from services.errors import actionable_error_message
 from services.plans import build_plan_attachments_for_state
 from ui.cli import renderer
 from ui.cli.commands import dispatch_command
@@ -108,11 +109,19 @@ class InlineRepl:
             on_cancel=self._cancel_current_turn,
         )
         self._terminal_app.append_banner()
+        if self._runtime.background_task_manager is not None:
+            self._runtime.background_task_manager.bind_terminal_notifier(
+                self._terminal_app.append_notice
+            )
         if not self._runtime.configured:
             self._terminal_app.append_notice(
                 "⚠ 尚未配置供应商。请输入 /connect 进行配置。"
             )
-        await self._terminal_app.run()
+        try:
+            await self._terminal_app.run()
+        finally:
+            if self._runtime.background_task_manager is not None:
+                self._runtime.background_task_manager.bind_terminal_notifier(None)
 
     async def _handle_terminal_submission(self, text: str) -> None:
         """Dispatch one line submitted by the persistent application."""
@@ -239,6 +248,13 @@ class InlineRepl:
                 resumed.state.session_id,
                 resumed.message_store.transcript_store.messages_path,
                 resumed.workspace,
+                classification=str(
+                    resumed.state.metadata.get(
+                        "resume_classification",
+                        "SAFE_RESUME",
+                    )
+                ),
+                reasons=tuple(resumed.state.metadata.get("resume_reasons", ())),
             ),
             presentation="inline",
             replay_messages=resumed.message_store.current_messages(),
@@ -493,17 +509,15 @@ class InlineRepl:
                 attributes={"turn_count": self._runtime.state.turn_count},
             )
             self._runtime.error_log_recorder.flush()
-            yield _error_event(str(exc))
+            yield _error_event(actionable_error_message(exc))
 
     def _cancel_current_turn(self) -> None:
-        """Record a user interrupt; the persistent app cancels its task."""
+        """Mark the active turn cancelled; the persistent app cancels its task."""
 
         self._cancel_requested = True
         if self._runtime is not None:
-            self._runtime.state.suspend(
-                InteractionKind.USER_INTERRUPT,
-                payload={"reason": "user_cancelled_turn"},
-            )
+            self._runtime.state.status = RunStatus.CANCELLED
+            self._runtime.state.resume()
 
     # --- shutdown ---------------------------------------------------------
 
@@ -512,6 +526,7 @@ class InlineRepl:
         runtime = self._runtime
         if runtime is None:
             return
+        runtime.persist_session_state()
         runtime.message_store.flush_transcript()
         runtime.trace_recorder.flush()
         runtime.error_log_recorder.flush()

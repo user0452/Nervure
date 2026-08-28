@@ -8,7 +8,7 @@ from typing import Any
 
 from core.context_engine import ContextEngine
 from core.loop import AgentLoop
-from core.runtime_state import RuntimeState
+from core.runtime_state import RunStatus, RuntimeState
 from core.stream_events import AgentEvent
 from core.transitions import TransitionReason
 from services.attachments.context_preparer import AttachmentContextPreparer
@@ -405,6 +405,7 @@ def test_loop_max_turns(tmp_path: Path) -> None:
 
     assert result == "Stopped: maximum turn count reached."
     assert loop.state.last_transition == TransitionReason.MAX_TURNS
+    assert loop.state.status == RunStatus.PARTIAL
     assert loop.state.turn_count == 2
     assert len(model_client.snapshots) == 1
     assert len(tool_executor.calls) == 1
@@ -810,6 +811,10 @@ def test_loop_stops_max_output_recovery_after_three_continuations(
     assert state.max_output_recovery_count == 3
     assert events[-1].type == "completed"
     assert events[-1].text == "partial-final"
+    assert events[-1].metadata["status"] == "partial"
+    assert events[-1].metadata["truncated"] is True
+    assert state.status == RunStatus.PARTIAL
+    assert state.last_transition == TransitionReason.MAX_OUTPUT_TOKENS_RECOVERY_EXHAUSTED
     assert [event.text for event in events if event.type == "assistant_delta"] == [
         "partial-final"
     ]

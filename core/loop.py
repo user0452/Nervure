@@ -31,12 +31,13 @@ rather than silently rewinding text the user has already seen.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable
+import asyncio
 import hashlib
 import json
 from typing import Any, Protocol
 
 from core.context_engine import ContextEngine
-from core.runtime_state import RuntimeState
+from core.runtime_state import RunStatus, RuntimeState
 from core.stream_events import AgentEvent, mint_assistant_call_id
 from core.transitions import TransitionReason
 from services.context.message_store import MessageStore
@@ -204,6 +205,7 @@ class AgentLoop:
         *,
         attachments: Iterable[dict[str, Any]] | None = None,
     ) -> AsyncIterator[AgentEvent]:
+        self.state.status = RunStatus.RUNNING
         if (
             self.state.interaction is not None
             and self.state.interaction.kind.value in {"plan_review", "user_interrupt"}
@@ -216,37 +218,54 @@ class AgentLoop:
         }
         if self.trace_recorder.is_debug:
             interaction_attributes["user_prompt"] = prompt
-        with self.trace_recorder.span("interaction", interaction_attributes):
-            await self.hooks.run(
-                HookEvent.USER_PROMPT_SUBMIT,
-                {
-                    "prompt_length": len(prompt),
-                    "session_id": self.state.session_id,
-                    "turn_count": self.state.turn_count,
-                    "user_turn_id": user_turn_id,
-                },
-            )
-            self.message_store.append_user(prompt)
-            if attachments is not None:
-                self.message_store.append_attachments(attachments)
-            yield AgentEvent(type="interaction_started")
-            async for event in self._run_loop_async():
-                yield event
+        try:
+            with self.trace_recorder.span("interaction", interaction_attributes):
+                await self.hooks.run(
+                    HookEvent.USER_PROMPT_SUBMIT,
+                    {
+                        "prompt_length": len(prompt),
+                        "session_id": self.state.session_id,
+                        "turn_count": self.state.turn_count,
+                        "user_turn_id": user_turn_id,
+                    },
+                )
+                self.message_store.append_user(prompt)
+                if attachments is not None:
+                    self.message_store.append_attachments(attachments)
+                yield AgentEvent(type="interaction_started")
+                async for event in self._run_loop_async():
+                    yield event
+        except asyncio.CancelledError:
+            self.state.status = RunStatus.CANCELLED
+            self.trace_recorder.event("interaction_cancelled", {})
+            raise
+        except Exception:
+            self.state.status = RunStatus.FAILED
+            raise
 
     async def continue_stream(self) -> AsyncIterator[AgentEvent]:
         """Continue from messages already seeded into the message store."""
 
+        self.state.status = RunStatus.RUNNING
         user_turn_id = self.state.begin_user_turn()
-        with self.trace_recorder.span(
-            "interaction",
-            {
-                "continued_from_seeded_messages": True,
-                "user_turn_id": user_turn_id,
-            },
-        ):
-            yield AgentEvent(type="interaction_started")
-            async for event in self._run_loop_async():
-                yield event
+        try:
+            with self.trace_recorder.span(
+                "interaction",
+                {
+                    "continued_from_seeded_messages": True,
+                    "user_turn_id": user_turn_id,
+                },
+            ):
+                yield AgentEvent(type="interaction_started")
+                async for event in self._run_loop_async():
+                    yield event
+        except asyncio.CancelledError:
+            self.state.status = RunStatus.CANCELLED
+            self.trace_recorder.event("interaction_cancelled", {})
+            raise
+        except Exception:
+            self.state.status = RunStatus.FAILED
+            raise
 
     async def _run_loop_async(self) -> AsyncIterator[AgentEvent]:
         while True:
@@ -265,6 +284,7 @@ class AgentLoop:
                 self.state.max_turns is not None
                 and self.state.turn_count > self.state.max_turns
             ):
+                self.state.status = RunStatus.PARTIAL
                 self.state.set_transition(TransitionReason.MAX_TURNS)
                 self._record_transition(TransitionReason.MAX_TURNS)
                 text = "Stopped: maximum turn count reached."
@@ -274,6 +294,7 @@ class AgentLoop:
                     metadata={
                         "model_turn_index": model_turn_index,
                         "assistant_call_id": assistant_call_id,
+                        "status": RunStatus.PARTIAL.value,
                     },
                 )
                 yield AgentEvent(
@@ -282,6 +303,7 @@ class AgentLoop:
                     metadata={
                         "model_turn_index": model_turn_index,
                         "assistant_call_id": assistant_call_id,
+                        "status": RunStatus.PARTIAL.value,
                     },
                 )
                 return
@@ -530,6 +552,42 @@ class AgentLoop:
                 tool_calls,
             )
 
+            if completed_message.output_interrupted:
+                self.state.status = RunStatus.PARTIAL
+                await self._after_turn_stopped(completed_message, ())
+                self.state.set_transition(
+                    TransitionReason.MAX_OUTPUT_TOKENS_RECOVERY_EXHAUSTED
+                )
+                self._record_transition(
+                    TransitionReason.MAX_OUTPUT_TOKENS_RECOVERY_EXHAUSTED
+                )
+                notice = (
+                    "Generation remained truncated after recovery; partial response "
+                    "was preserved."
+                )
+                yield AgentEvent(
+                    type="transition",
+                    transition=(
+                        TransitionReason.MAX_OUTPUT_TOKENS_RECOVERY_EXHAUSTED.value
+                    ),
+                    metadata={
+                        "model_turn_index": model_turn_index,
+                        "assistant_call_id": assistant_call_id,
+                    },
+                )
+                yield AgentEvent(
+                    type="completed",
+                    text=completed_message.final_text,
+                    metadata={
+                        "model_turn_index": model_turn_index,
+                        "assistant_call_id": assistant_call_id,
+                        "status": RunStatus.PARTIAL.value,
+                        "truncated": True,
+                        "notice": notice,
+                    },
+                )
+                return
+
             # 是否继续执行工具取决于实际 tool_calls，而不是 provider 私有的
             # stop reason 字段。
             if tool_calls:
@@ -548,6 +606,7 @@ class AgentLoop:
                 if followup_messages:
                     self.message_store.append_attachments(followup_messages)
                 if self.state.is_suspended():
+                    self.state.status = RunStatus.WAITING_USER
                     interaction = self.state.interaction
                     assert interaction is not None
                     yield AgentEvent(
@@ -567,6 +626,7 @@ class AgentLoop:
                 )
                 continue
 
+            self.state.status = RunStatus.COMPLETED
             await self._after_turn_stopped(completed_message, tool_calls)
             self.state.set_transition(TransitionReason.COMPLETED)
             self._record_transition(TransitionReason.COMPLETED)
@@ -576,6 +636,7 @@ class AgentLoop:
                 metadata={
                     "model_turn_index": model_turn_index,
                     "assistant_call_id": assistant_call_id,
+                    "status": RunStatus.COMPLETED.value,
                 },
             )
             yield AgentEvent(
@@ -584,6 +645,7 @@ class AgentLoop:
                 metadata={
                     "model_turn_index": model_turn_index,
                     "assistant_call_id": assistant_call_id,
+                    "status": RunStatus.COMPLETED.value,
                 },
             )
             return
