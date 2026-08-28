@@ -50,7 +50,7 @@ from services.tools.executor import RegistryToolExecutor, ToolExecutor
 from services.tools.file_state import FileStateCache
 from services.tools.registry import ToolRegistry
 from services.tools.types import ToolDescriptor
-from tools.agent import descriptor as agent_descriptor
+from ui.cli.runtime_tool_composition import RuntimeToolComposition
 from utils.toolResultStorage import ToolResultStorage
 
 
@@ -96,6 +96,7 @@ class CliRuntime:
     background_task_manager: BackgroundTaskManager | None = None
     guard: SandboxGuard | None = None
     base_descriptors: tuple[ToolDescriptor, ...] = ()
+    tool_composition: RuntimeToolComposition | None = None
     subagent_runner_ref: dict[str, SubagentRunner] | None = None
     long_term_memory_extractor_ref: dict[str, LongTermMemoryExtractionService] | None = None
     # Plan-mode wiring: the plan store owns the .nervure/plans/ files (with legacy .onecode fallback) and the
@@ -249,18 +250,21 @@ class CliRuntime:
                 permission_prompter=self.permission_prompter,
                 trace_recorder=self.trace_recorder,
                 checkpoint_store=self.checkpoint_store,
+                compaction_config=(
+                    self.compaction_service.config
+                    if self.compaction_service is not None
+                    else None
+                ),
             )
             if self.subagent_runner_ref is not None:
                 self.subagent_runner_ref["runner"] = subagent_runner
 
         registry = self.registry
-        if subagent_runner is not None and self.base_descriptors:
-            registry = ToolRegistry(
-                (
-                    *self.base_descriptors,
-                    agent_descriptor(subagent_runner, self.background_task_manager),
-                ),
+        if self.tool_composition is not None:
+            registry = self.tool_composition.build_registry(
                 permission_policy=self.permission_policy,
+                subagent_runner=subagent_runner,
+                background_task_manager=self.background_task_manager,
             )
 
         long_term_memory_extractor = self.long_term_memory_extractor

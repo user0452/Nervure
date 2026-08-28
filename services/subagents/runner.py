@@ -10,11 +10,14 @@ from typing import Any
 from core.context_engine import ContextEngine, StaticPromptAssembler
 from core.loop import AgentLoop
 from core.runtime_state import PermissionMode, RuntimeState
+from services.compaction import ContextCompactionService
+from services.compaction.types import CompactionConfig
 from services.context.message_store import MessageStore
 from services.context.current_model_context import CurrentModelContext
 from services.context.snapshot import ContextSnapshot
 from services.guard import SandboxGuard
 from services.model.client import ModelClient
+from services.model.types import ProviderError
 from services.observability import TraceRecorder
 from services.permissions import PermissionPolicy, PermissionPrompter
 from services.subagents.definitions import get_agent_definition
@@ -43,6 +46,7 @@ class SubagentRunner:
         permission_prompter: PermissionPrompter | None,
         trace_recorder: TraceRecorder,
         checkpoint_store: CheckpointStore | None = None,
+        compaction_config: CompactionConfig | None = None,
     ) -> None:
         self._workspace = workspace
         self._transcript_root = transcript_root
@@ -55,6 +59,7 @@ class SubagentRunner:
         self._permission_prompter = permission_prompter
         self._trace_recorder = trace_recorder
         self._checkpoint_store = checkpoint_store
+        self._compaction_config = compaction_config
 
     @property
     def checkpoint_store(self) -> CheckpointStore | None:
@@ -148,10 +153,13 @@ class SubagentRunner:
             is_fork=is_fork,
             snapshot=fork_snapshot,
         )
+        compaction_service = self._child_compaction_service(child_store)
         context_engine = ContextEngine(
             child_store,
             prompt_assembler=prompt_assembler,
             tool_schema_provider=registry,
+            context_preparer=compaction_service,
+            final_context_budget_manager=compaction_service,
         )
         tool_executor = RegistryToolExecutor(
             registry,
@@ -172,6 +180,7 @@ class SubagentRunner:
             model_client=self._model_client,
             tool_executor=tool_executor,
             trace_recorder=self._trace_recorder,
+            compaction_service=compaction_service,
         )
         return await self._drain_loop(
             loop,
@@ -224,10 +233,13 @@ class SubagentRunner:
             _child_descriptors(definition, self._base_descriptors),
             permission_policy=permission_policy,
         )
+        compaction_service = self._child_compaction_service(child_store)
         context_engine = ContextEngine(
             child_store,
             prompt_assembler=StaticPromptAssembler(definition.system_prompt),
             tool_schema_provider=registry,
+            context_preparer=compaction_service,
+            final_context_budget_manager=compaction_service,
         )
         tool_executor = RegistryToolExecutor(
             registry,
@@ -244,6 +256,7 @@ class SubagentRunner:
             model_client=self._model_client,
             tool_executor=tool_executor,
             trace_recorder=self._trace_recorder,
+            compaction_service=compaction_service,
         )
         return await self._drain_loop(
             loop,
@@ -252,6 +265,17 @@ class SubagentRunner:
             definition,
             request,
             is_fork=False,
+        )
+
+    def _child_compaction_service(
+        self,
+        child_store: MessageStore,
+    ) -> ContextCompactionService:
+        return ContextCompactionService(
+            config=self._compaction_config,
+            message_store=child_store,
+            model_client=self._model_client,
+            trace_recorder=self._trace_recorder,
         )
 
     def _configure_long_term_memory_extraction_child(
@@ -371,11 +395,23 @@ class SubagentRunner:
                     "visible_output_tokens": child_state.usage.visible_output_tokens,
                 },
             )
+            context_limit = (
+                isinstance(exc, ProviderError)
+                and exc.error_type == "context_limit_exceeded"
+            )
             return self._error_result(
                 agent_type=definition.agent_type,
                 session_id=child_state.session_id,
-                message=f"Subagent failed: {type(exc).__name__}: {exc}",
-                error="subagent_error",
+                message=(
+                    "Subagent context remains over budget after bounded compaction."
+                    if context_limit
+                    else f"Subagent failed: {type(exc).__name__}: {exc}"
+                ),
+                error=(
+                    "subagent_context_limit"
+                    if context_limit
+                    else "subagent_error"
+                ),
                 transition=(
                     child_state.last_transition.value
                     if child_state.last_transition is not None

@@ -8,11 +8,12 @@ from typing import Any
 
 from core.runtime_state import RuntimeState
 from infrastructure.filesystem.nervure_paths import session_messages_path, sessions_dir
+from services.compaction.types import CompactionConfig
 from services.context.message_store import MessageStore
 from services.context.snapshot import ContextSnapshot
 from services.guard import SandboxBoundary, SandboxGuard
 from services.model.stream import ModelStreamEvent
-from services.model.types import LLMResponse, ModelUsage
+from services.model.types import LLMResponse, ModelUsage, ProviderError
 from services.observability import TraceRecorder
 from services.permissions import PermissionPolicy, SessionPermissionStore
 from services.context.current_model_context import CurrentModelContext
@@ -33,7 +34,7 @@ from ui.cli.resume import list_session_summaries
 
 @dataclass
 class FakeModelClient:
-    responses: list[LLMResponse]
+    responses: list[LLMResponse | BaseException]
     snapshots: list[ContextSnapshot] = field(default_factory=list)
 
     async def stream(self, snapshot: ContextSnapshot):
@@ -41,6 +42,8 @@ class FakeModelClient:
         if not self.responses:
             raise AssertionError("unexpected model call")
         response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
         yield ModelStreamEvent.message_completed(
             assistant_message=response.assistant_message,
             final_text=response.final_text,
@@ -70,13 +73,14 @@ def assistant(text: str) -> dict[str, Any]:
 
 def make_runner(
     tmp_path: Path,
-    responses: list[LLMResponse],
+    responses: list[LLMResponse | BaseException],
     *,
     parent_store: MessageStore | None = None,
     current_context: CurrentModelContext | None = None,
     base_descriptors: tuple[ToolDescriptor, ...] = (),
     permission_policy: PermissionPolicy | None = None,
     permission_prompter=None,
+    compaction_config: CompactionConfig | None = None,
 ) -> tuple[SubagentRunner, FakeModelClient, MessageStore, PermissionPolicy]:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -100,6 +104,7 @@ def make_runner(
         permission_policy=policy,
         permission_prompter=permission_prompter,
         trace_recorder=TraceRecorder.noop("parent-session"),
+        compaction_config=compaction_config,
     )
     return runner, model, parent_store, policy
 
@@ -323,6 +328,141 @@ def test_fork_subagent_does_not_create_resumable_session(tmp_path: Path) -> None
     session_ids = {summary.session_id for summary in list_session_summaries(tmp_path)}
     assert "parent-session" in session_ids
     assert result.session_id not in session_ids
+
+
+def test_large_fork_context_compacts_only_child_messages(tmp_path: Path) -> None:
+    parent_store = MessageStore(
+        transcript_root=sessions_dir(tmp_path),
+        session_id="parent-session",
+        flush_interval_seconds=60,
+    )
+    parent_store.append_user("parent transcript stays unchanged")
+    inherited = "large inherited context " * 300
+    current_context = CurrentModelContext(
+        ContextSnapshot(
+            system_prompt="PARENT PROMPT",
+            messages=({"role": "user", "content": inherited},),
+        )
+    )
+    runner, model, _parent_store, _policy = make_runner(
+        tmp_path,
+        [
+            LLMResponse(
+                assistant_message=assistant("<summary>reduced child context</summary>"),
+                final_text="<summary>reduced child context</summary>",
+            ),
+            LLMResponse(
+                assistant_message=assistant("fork done"),
+                final_text="fork done",
+            ),
+        ],
+        parent_store=parent_store,
+        current_context=current_context,
+        compaction_config=CompactionConfig(
+            context_window_tokens=1_000,
+            recent_tail_min_tokens=0,
+            recent_tail_max_tokens=80,
+        ),
+    )
+
+    result = run(
+        runner.run(
+            SubagentRequest(
+                prompt="finish the delegated task",
+                subagent_type=None,
+                parent_session_id="parent-session",
+                parent_tool_call_id="call-agent",
+            )
+        )
+    )
+
+    assert result.final_text == "fork done"
+    assert len(model.snapshots) == 2
+    assert model.snapshots[0].messages[-1]["metadata"]["is_compact_instruction"] is True
+    assert len(str(model.snapshots[1].messages)) < len(str(model.snapshots[0].messages))
+    assert parent_store.current_messages() == (
+        {"role": "user", "content": "parent transcript stays unchanged"},
+    )
+    assert current_context.snapshot is not None
+    assert current_context.snapshot.messages[0]["content"] == inherited
+
+
+def test_child_context_limit_retries_once_after_local_compaction(
+    tmp_path: Path,
+) -> None:
+    parent_store = MessageStore(
+        transcript_root=sessions_dir(tmp_path),
+        session_id="parent-session",
+        flush_interval_seconds=60,
+    )
+    parent_store.append_user("parent message")
+    runner, model, _parent_store, _policy = make_runner(
+        tmp_path,
+        [
+            ProviderError("too large", error_type="context_limit_exceeded"),
+            LLMResponse(
+                assistant_message=assistant("<summary>child retry state</summary>"),
+                final_text="<summary>child retry state</summary>",
+            ),
+            LLMResponse(
+                assistant_message=assistant("recovered"),
+                final_text="recovered",
+            ),
+        ],
+        parent_store=parent_store,
+    )
+
+    result = run(
+        runner.run(
+            SubagentRequest(
+                prompt="inspect the child task",
+                subagent_type="general-purpose",
+                parent_session_id="parent-session",
+                parent_tool_call_id="call-agent",
+            )
+        )
+    )
+
+    assert result.final_text == "recovered"
+    assert len(model.snapshots) == 3
+    assert model.snapshots[1].messages[-1]["metadata"]["is_compact_instruction"] is True
+    assert parent_store.current_messages() == (
+        {"role": "user", "content": "parent message"},
+    )
+
+
+def test_unrecoverable_child_context_limit_returns_deterministic_error(
+    tmp_path: Path,
+) -> None:
+    runner, model, _parent_store, _policy = make_runner(
+        tmp_path,
+        [
+            ProviderError("first", error_type="context_limit_exceeded"),
+            LLMResponse(
+                assistant_message=assistant("<summary>reduced</summary>"),
+                final_text="<summary>reduced</summary>",
+            ),
+            ProviderError("second", error_type="context_limit_exceeded"),
+        ],
+    )
+
+    result = run(
+        runner.run(
+            SubagentRequest(
+                prompt="inspect",
+                subagent_type="general-purpose",
+                parent_session_id="parent-session",
+                parent_tool_call_id="call-agent",
+            )
+        )
+    )
+
+    assert result.is_error is True
+    assert result.metadata["error"] == "subagent_context_limit"
+    assert result.final_text == (
+        "Subagent context remains over budget after bounded compaction."
+    )
+    assert len(model.snapshots) == 3
 
 
 def test_child_registry_hides_agent_even_when_base_descriptors_include_it(

@@ -8,6 +8,7 @@
 |:---|:---|
 | `types.py` | 共享类型：`ToolDescriptor`、`ToolCall`、`ToolExecutionResult`、`ToolRuntime`、`ToolTarget`、`ToolResultPolicy`、`ToolCallClassification`、`ValidationResult`；fail-closed 默认分类器；`is_guard_policy_allowed()` |
 | `registry.py` | `ToolRegistry`：注册/排序、可见性过滤、导出 schema 与 prompt 片段 |
+| `discovery.py` | `ToolDiscovery`：按当前顶层用户请求做简单词法 schema/prompt 裁剪；无可靠匹配时回退完整可见集 |
 | `schema.py` | `descriptor_to_openai_tool_schema()`：descriptor → OpenAI function schema |
 | `executor.py` | `RegistryToolExecutor`：完整执行管线、guard/permission/hook、并发、结果预算、side effects |
 | `file_state.py` | `FileStateCache`：缓存文件 mtime/内容，供 `write_file` 防竞态、生成 diff |
@@ -41,6 +42,8 @@ handler 入参：`state`、`guard`、`file_state_cache`、`approved_guard_polici
 ### ToolRegistry
 
 `visible_descriptors(state)` 是 schema 与 prompt 的共同入口，可见性来源：registry 构造期的 `disabled_tools`/`denied_tools`、`state.metadata` 中的 `disabled_tools`/`denied_tools`/`hidden_tools`、注入的 `PermissionPolicy.is_tool_visible()`。被隐藏/禁用/拒绝的工具不进入 `tool_schemas(state)` 或 `tool_prompt_sections(state)`。
+
+可选 `ToolDiscovery` 只在上述权限可见集之后进一步裁剪 provider-visible schemas 和 prompt sections，不删除 registry descriptor，也不改变 `get()` 或 executor authority。`AgentLoop.stream(prompt)` 在每个新顶层用户 turn 开始时把当前 prompt 写入 `tool_discovery_query`，覆盖上一轮；`continue_stream()` 在 seeded child/internal flow 开始时删除该键。词法选择没有匹配到相关工具时回退完整权限可见集，metadata 标为 always-visible 的核心文件工具始终保留。
 
 ## 核心数据流
 

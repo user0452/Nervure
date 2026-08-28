@@ -193,6 +193,8 @@ flowchart TD
 5. **模型选择器**：`TransientSelector` 展示模型列表。
 6. **保存**：`write_provider_env()` 更新 `ONECODE_*` 键 → `with_model_config()` 重建模型客户端（`configured` 变为 `True`）。
 
+启动时选定的 provider-visible 工具组合由 `runtime_tool_composition.RuntimeToolComposition` 保存：base descriptors 已包含 builtin 实验开关和 MCP descriptors，另保存词法 `ToolDiscovery` 与 `agent` 是否启用。`build_runtime()` 和 `with_model_config()` 都通过这个组合值构造 registry；后者只用新 model client 重建 runner-bound `agent` descriptor，不重新解释环境开关。因此 `/connect` 不会改变 disabled builtin、repo_map/symbol_search、MCP、PermissionPolicy 或 discovery 行为。
+
 ### 权限
 
 TTY：`TerminalInteractionHost` 使用可擦除临时 permission modal，只消费 `PermissionRequest.options` 中的 allow once、allow session、deny 三项。Esc 和 Ctrl-C 返回 deny。流式预览运行中不启动嵌套 app、不打印 confirm，而是把 modal 渲染到当前动态区。非 TTY / batch：`BatchPermissionPrompter` 用 stdin 行输入 fallback，也只接受 once/session/deny。权限请求 prompt 不写项目规则，不生成 `projectSettings` update。

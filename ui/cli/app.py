@@ -84,9 +84,7 @@ from services.subagents.runner import SubagentRunner
 from services.tasks import TaskStore
 from services.tools.executor import RegistryToolExecutor
 from services.tools.file_state import FileStateCache
-from services.tools.registry import ToolRegistry
 from services.tools.discovery import ToolDiscovery, ToolMetadata
-from tools.agent import descriptor as agent_descriptor
 from tools.ask_user_question import descriptor as ask_user_question_descriptor
 from tools.bash import descriptor as bash_descriptor
 from tools.background_task_stop import descriptor as background_task_stop_descriptor
@@ -107,6 +105,10 @@ from tools.write_file import descriptor as write_file_descriptor
 from ui.cli import renderer
 from ui.cli.input import ConfirmOption, read_confirm_sync
 from ui.cli.permissions import render_permission_request_summary
+from ui.cli.runtime_tool_composition import (
+    RuntimeToolComposition,
+    runtime_bound_agent_descriptors,
+)
 from ui.cli.types import CliRuntime
 from utils.toolResultStorage import ToolResultStorage
 
@@ -139,11 +141,13 @@ def _subagent_descriptors(
     runner: SubagentRunner,
     background_task_manager: BackgroundTaskManager,
 ) -> tuple:
-    """Return the provider-visible agent descriptor according to the switch."""
+    """Compatibility wrapper for the startup-selected agent switch."""
 
-    if _subagent_disabled():
-        return ()
-    return (agent_descriptor(runner, background_task_manager),)
+    return runtime_bound_agent_descriptors(
+        enabled=not _subagent_disabled(),
+        subagent_runner=runner,
+        background_task_manager=background_task_manager,
+    )
 
 
 def _repo_map_descriptors() -> tuple:
@@ -357,7 +361,14 @@ def build_runtime(
             ToolMetadata("skill", "capability"),
         )
     )
-    registry = ToolRegistry(base_descriptors, permission_policy=permission_policy, discovery=tool_discovery)
+    tool_composition = RuntimeToolComposition(
+        base_descriptors=base_descriptors,
+        discovery=tool_discovery,
+        agent_enabled=not _subagent_disabled(),
+    )
+    registry = tool_composition.build_registry(
+        permission_policy=permission_policy,
+    )
     result_store = ToolResultStorage(message_store.transcript_store.session_dir)
     long_term_memory_store = LongTermMemoryStore(workspace)
     instruction_memory_loader = InstructionMemoryLoader(
@@ -430,6 +441,7 @@ def build_runtime(
         permission_prompter=permission_prompter,
         trace_recorder=trace_recorder,
         checkpoint_store=checkpoint_store,
+        compaction_config=compaction_service.config,
     )
     runner_ref["runner"] = subagent_runner
     long_term_memory_extractor = LongTermMemoryExtractionService(
@@ -450,8 +462,11 @@ def build_runtime(
         model_client=model_client,
         current_model_context=current_model_context,
     )
-    for descriptor in _subagent_descriptors(subagent_runner, background_task_manager):
-        registry.register(descriptor)
+    tool_composition.register_runtime_bound_tools(
+        registry,
+        subagent_runner=subagent_runner,
+        background_task_manager=background_task_manager,
+    )
     tool_executor = RegistryToolExecutor(
         registry,
         guard=guard,
@@ -510,6 +525,7 @@ def build_runtime(
         background_task_manager=background_task_manager,
         guard=guard,
         base_descriptors=base_descriptors,
+        tool_composition=tool_composition,
         subagent_runner_ref=runner_ref,
         long_term_memory_extractor_ref=long_term_memory_extractor_ref,
         plan_store=plan_store,

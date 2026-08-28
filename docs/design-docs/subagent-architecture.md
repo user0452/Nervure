@@ -41,7 +41,7 @@ flowchart TD
   Run --> Def{"subagent_type 是否为 None?"}
   Def -->|否| Clean["内置定义 + 干净消息链(单条 prompt)"]
   Def -->|是| Fork["fork: 深拷贝父链 + 占位 tool_result + directive\n继承父 ContextSnapshot.system_prompt"]
-  Clean --> Assemble["新建 RuntimeState/ephemeral MessageStore/ToolRegistry/ContextEngine/Executor/AgentLoop"]
+  Clean --> Assemble["新建 RuntimeState/ephemeral MessageStore/ToolRegistry/Compaction/ContextEngine/Executor/AgentLoop"]
   Fork --> Assemble
   Assemble --> Drain["continue_stream() → _drain_loop"]
   Drain --> Result["SubagentResult(final_text, usage, ...)"]
@@ -52,11 +52,15 @@ flowchart TD
 
 ### Child runtime 装配
 
-`SubagentRunner.run()` 为每次调用创建独立的 `RuntimeState`、ephemeral `MessageStore`（只保留运行期内存消息链，不写 `.nervure/sessions/<child_session_id>/messages.jsonl`）、`ToolRegistry`、`ContextEngine`、`RegistryToolExecutor`、`AgentLoop`，共享父级的 workspace、model client、sandbox guard、permission policy、permission prompter、trace recorder 和 base descriptors。child 的中间消息只存在于 child runtime 内存中，不写回父 `MessageStore`，也不会成为可 `/resume` 的用户会话；父链只收到 `agent` 工具的最终 `ToolExecutionResult`。
+`SubagentRunner.run()` 为每次调用创建独立的 `RuntimeState`、ephemeral `MessageStore`（只保留运行期内存消息链，不写 `.nervure/sessions/<child_session_id>/messages.jsonl`）、`ToolRegistry`、`ContextCompactionService`、`ContextEngine`、`RegistryToolExecutor`、`AgentLoop`，共享父级的 workspace、model client、sandbox guard、permission policy、permission prompter、trace recorder 和 base descriptors。child 的中间消息和 compact replacement 只存在于 child runtime 内存中，不写回父 `MessageStore`，也不会成为可 `/resume` 的用户会话；父链只收到 `agent` 工具的最终 `ToolExecutionResult`。
 
 ### Fork 机制
 
 fork 由 `subagent_type is None` 决定（不是 `request.mode`）。`build_forked_messages`：深拷贝父 `current_messages()`；若最后一条 assistant 有未闭合 tool_use，为每个缺失 tool_call_id 追加占位 `tool_result`（content `Fork started...`，metadata `placeholder: fork_started`），修复 provider 协议错误；再追加含 `FORK_DIRECTIVE_TEMPLATE` 的 user 消息。fork child 继承父轮次已渲染的 `ContextSnapshot.system_prompt` 字符串，复用父上下文和 prompt 字节，而非重新组装。
+
+### Child context budget
+
+每个普通、fork 和 skill child 都把自己的 `ContextCompactionService` 同时接到 `ContextEngine` 的 cheap/final budget 边界和 `AgentLoop` 的 reactive compact 边界。完整 child snapshot 超阈值时，只替换 child ephemeral store 的活动消息链并重建一次；重建后仍超量会在模型调用前抛出 `context_limit_exceeded`。若 Provider 对一个本地估算可容纳的 child snapshot 返回 context limit，现有 `RuntimeState.has_attempted_reactive_compact` 只允许一次 child-local compact 和重试。第二次失败折叠为 `SubagentResult.metadata["error"] == "subagent_context_limit"`，不会循环。父 `MessageStore` 与父 `CurrentModelContext` 始终不参与 child compact 写入。
 
 > `SubagentRequest.mode`（`clean`/`fork`）已定义但 `run()` 不读取；仅 `run_skill()` 显式设 `mode="clean"`。
 
