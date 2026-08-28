@@ -169,27 +169,26 @@ class ToolRegistry:
             return ToolSearchSelection(deferred_mode=True)
 
         current_names = self._loaded_tool_names(state)
-        baseline = tuple(
-            descriptor
-            for descriptor in self.visible_descriptors(state)
-            if descriptor.name not in current_names
+        current_visible_schema_tokens = self._schema_tokens(
+            self.visible_descriptors(state)
         )
-        baseline_tokens = self._schema_tokens(baseline)
         selected: list[ToolDescriptor] = []
+        selected_schema_tokens = 0
         schema_budget_reached = False
         for descriptor in ranked:
             if len(selected) >= self._exposure_config.max_loaded_from_search:
                 break
             candidate_tokens = self._schema_tokens((descriptor,))
             if (
-                baseline_tokens
-                + self._schema_tokens(tuple(selected))
+                current_visible_schema_tokens
+                + selected_schema_tokens
                 + candidate_tokens
                 > self._exposure_config.max_loaded_schema_tokens
             ):
                 schema_budget_reached = True
                 continue
             selected.append(descriptor)
+            selected_schema_tokens += candidate_tokens
 
         if selected:
             current_names.update(descriptor.name for descriptor in selected)

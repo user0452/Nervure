@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from core.runtime_state import RuntimeState
+from services.compaction.token_estimator import estimate_serialized_tokens
 from services.context.message_store import MessageStore
 from services.guard import SandboxBoundary, SandboxGuard
 from services.permissions import PermissionPolicy, SessionPermissionStore
@@ -193,6 +194,83 @@ def test_tool_search_no_match_never_exposes_the_deferred_catalog() -> None:
     assert LOADED_TOOL_NAMES_METADATA_KEY not in state.metadata
     assert "mcp_github_pull_request" not in _names(registry, state)
     assert "special_tool_0" not in _names(registry, state)
+
+
+def test_tool_search_schema_budget_includes_previously_loaded_tools() -> None:
+    first_alpha = _descriptor(
+        "first_alpha",
+        "First search capability for an isolated deferred workflow "
+        + "details " * 250,
+    )
+    first_beta = _descriptor(
+        "first_beta",
+        "First search capability for a second isolated deferred workflow "
+        + "details " * 250,
+    )
+    second_small = _descriptor(
+        "second_a_small",
+        "Second search capability with a small schema.",
+    )
+    second_large = _descriptor(
+        "second_z_large",
+        "Second search capability with an oversized schema " + "payload " * 100,
+    )
+    descriptors = (
+        *(_descriptor(name) for name in CORE_NAMES),
+        _descriptor("agent", "Delegate work to an isolated subagent."),
+        first_alpha,
+        first_beta,
+        second_small,
+        second_large,
+        tool_search_descriptor(),
+    )
+    state = RuntimeState()
+    provisional = ToolRegistry(
+        descriptors,
+        exposure_config=ToolExposureConfig(
+            max_direct_tool_count=1,
+            max_loaded_schema_tokens=1_000_000,
+        ),
+    )
+    initial_visible_schema_tokens = provisional._schema_tokens(
+        provisional.visible_descriptors(state)
+    )
+    max_loaded_schema_tokens = (
+        initial_visible_schema_tokens
+        + provisional._schema_tokens((first_alpha,))
+        + provisional._schema_tokens((first_beta,))
+        + provisional._schema_tokens((second_small,))
+    )
+    registry = ToolRegistry(
+        descriptors,
+        exposure_config=ToolExposureConfig(
+            max_direct_tool_count=1,
+            max_loaded_schema_tokens=max_loaded_schema_tokens,
+        ),
+    )
+
+    first_selection = registry.search_and_load(state, "first")
+    second_selection = registry.search_and_load(state, "second")
+    final_visible_schema_tokens = estimate_serialized_tokens(
+        registry.tool_schemas(state)
+    )
+
+    assert {descriptor.name for descriptor in first_selection.loaded} == {
+        "first_alpha",
+        "first_beta",
+    }
+    assert first_selection.schema_budget_reached is False
+    assert [descriptor.name for descriptor in second_selection.loaded] == [
+        "second_a_small"
+    ]
+    assert second_selection.schema_budget_reached is True
+    assert {
+        "first_alpha",
+        "first_beta",
+        "second_a_small",
+    }.issubset(_names(registry, state))
+    assert "second_z_large" not in _names(registry, state)
+    assert final_visible_schema_tokens <= max_loaded_schema_tokens
 
 
 def test_hidden_disabled_and_permission_denied_tools_cannot_be_discovered() -> None:
