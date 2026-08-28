@@ -287,6 +287,7 @@ class RegistryToolExecutor:
                 state=state,
                 guard=self._guard,
                 file_state_cache=self._file_state_cache,
+                registry=self._registry,
                 tool_call_id=tool_call.id,
             )
             tool_input = dict(tool_call.input)

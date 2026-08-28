@@ -12,7 +12,6 @@ from services.hooks import HookEvent, HookRegistry
 from services.memory.instruction_loader import InstructionMemoryLoader
 from services.skills import SkillCommand, SkillRegistry
 from services.subagents import get_agent_profile
-from services.tools.discovery import ToolDiscovery, ToolMetadata
 from services.tools.registry import ToolRegistry
 from services.tools.executor import RegistryToolExecutor
 from services.tools.types import ToolCall, ToolCallClassification, ToolDescriptor, ToolExecutionResult, ToolRuntime, ToolTarget
@@ -76,18 +75,6 @@ def test_hooks_honor_priority_disable_and_isolate_errors() -> None:
 
     assert observed == ["high"]
     assert result.metadata["hook_errors"] == ["boom"]
-
-
-def test_tool_discovery_filters_but_falls_back_and_keeps_safety_tools() -> None:
-    registry = ToolRegistry(
-        (_descriptor("read_file", "Read files"), _descriptor("database", "Database query", "SQL database"), _descriptor("browser", "Browse pages")),
-        discovery=ToolDiscovery((ToolMetadata("read_file", "file safety", True), ToolMetadata("database", "database"))),
-    )
-    state = RuntimeState()
-    state.metadata["tool_discovery_query"] = "database migration"
-    assert [tool.name for tool in registry.visible_descriptors(state)] == ["database", "read_file"]
-    state.metadata["tool_discovery_query"] = "unrelated phrase"
-    assert {tool.name for tool in registry.visible_descriptors(state)} == {"read_file", "database", "browser"}
 
 
 def test_checkpoint_store_restores_files_only_after_confirmation(tmp_path: Path) -> None:

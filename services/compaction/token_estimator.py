@@ -46,6 +46,16 @@ def estimate_snapshot_tokens(snapshot: ContextSnapshot) -> int:
     )
 
 
+def estimate_serialized_tokens(value: Any) -> int:
+    """Estimate tokens for a provider-visible JSON value.
+
+    Tool exposure uses this existing conservative serialization estimate rather
+    than introducing a separate context-budget model.
+    """
+
+    return _estimate_json_field_tokens(value)
+
+
 def _estimate_content_tokens(content: Any) -> int:
     if content is None:
         return 0

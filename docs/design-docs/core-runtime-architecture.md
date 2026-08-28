@@ -21,8 +21,8 @@ async def stream(prompt, *, attachments=None) -> AsyncIterator[AgentEvent]
 async def continue_stream() -> AsyncIterator[AgentEvent]
 ```
 
-- `stream` 是普通用户交互入口：用当前 prompt 刷新 `tool_discovery_query`，触发 `UserPromptSubmit` hook，追加 user message 与调用方预构建的 durable attachment，再进入 `_run_loop_async()`。
-- `continue_stream` 用于子 agent / 恢复场景：先清除可能残留的 `tool_discovery_query`，再从已 seed 到 `MessageStore` 的消息链继续，不重复追加用户 prompt。
+- `stream` 是普通用户交互入口：触发 `UserPromptSubmit` hook，追加 user message 与调用方预构建的 durable attachment，再进入 `_run_loop_async()`。用户 prompt 不会决定 provider-visible 工具 schema；延迟工具只能由显式 `tool_search` 加载。
+- `continue_stream` 用于子 agent / 恢复场景：从已 seed 到 `MessageStore` 的消息链继续，不重复追加用户 prompt。它保留当前 RuntimeState 的已加载 deferred 工具集合，不执行按 prompt 的工具裁剪。
 
 构造依赖（除前 5 个外均可选）：`state`、`message_store`、`context_engine`、`model_client`、`tool_executor`、`trace_recorder`、`current_model_context`、`hooks`、`compaction_service`（`ReactiveCompactor`）、`session_memory_extractor`、`session_memory_updater`、`model_retry_runner`、`error_log_recorder`。
 

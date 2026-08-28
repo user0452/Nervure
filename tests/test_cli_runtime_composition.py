@@ -100,7 +100,6 @@ def test_production_runtime_composition_shares_checkpoint_store(
     )
     rebuilt = runtime.with_session(state=next_state, message_store=next_store)
     all_before = {descriptor.name for descriptor in rebuilt.registry.descriptors()}
-    rebuilt.state.metadata["tool_discovery_query"] = "shell command"
     before_names = {
         descriptor.name
         for descriptor in rebuilt.registry.visible_descriptors(rebuilt.state)
@@ -118,18 +117,10 @@ def test_production_runtime_composition_shares_checkpoint_store(
     assert all_after == all_before
     assert before_names == after_names
     assert {"read_file", "glob", "grep", "bash"} <= after_names
-    assert "mcp_probe" not in after_names
-
-    reconfigured.state.metadata["tool_discovery_query"] = "external docs"
-    assert "mcp_probe" in {
-        descriptor.name
-        for descriptor in reconfigured.registry.visible_descriptors(
-            reconfigured.state
-        )
-    }
+    assert "mcp_probe" in after_names
 
 
-def test_model_reconfiguration_preserves_disabled_agent_and_discovery(
+def test_model_reconfiguration_preserves_disabled_agent_and_tool_exposure(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -138,7 +129,6 @@ def test_model_reconfiguration_preserves_disabled_agent_and_discovery(
 
     runtime = app.build_runtime(tmp_path)
     normal_names = {descriptor.name for descriptor in runtime.registry.descriptors()}
-    runtime.state.metadata["tool_discovery_query"] = "shell command"
     visible_before = {
         descriptor.name
         for descriptor in runtime.registry.visible_descriptors(runtime.state)

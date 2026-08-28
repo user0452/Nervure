@@ -6,12 +6,12 @@
 - `SkillRegistry` for validated skill discovery/search/load, alongside the existing inline/fork skill tool.
 - `AgentProfile` declarations for Explore, Implement, and Review child agents.
 - Prioritized, enabled/disabled, exception-isolated tool lifecycle hooks.
-- Lexical `ToolDiscovery` for lazy provider-schema selection with deterministic fallback and always-visible safety tools.
+- Deferred Tool Search: small allowed toolsets expose normal schemas directly; large or schema-heavy sets keep core tools plus `tool_search` visible and load matching deferred schemas only after explicit retrieval.
 - File-only mutation checkpoints with explicit-confirmation restore.
 
 ## Architecture boundaries
 
-The main loop remains unchanged as an orchestrator. Prompt instruction rendering stays in the context/prompt layer; skills and profiles use the existing subagent/tool contracts; hooks and checkpoints are installed at executor lifecycle boundaries. Discovery filters provider visibility only and does not weaken direct execution permissions.
+The main loop remains unchanged as an orchestrator. Prompt instruction rendering stays in the context/prompt layer; skills and profiles use the existing subagent/tool contracts; hooks and checkpoints are installed at executor lifecycle boundaries. Deferred exposure filters provider schemas only and does not weaken direct execution permissions.
 
 ## Verification
 

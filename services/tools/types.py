@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from services.guard import GuardPolicy
     from services.guard import SandboxGuard
     from services.tools.file_state import FileStateCache
+    from services.tools.registry import ToolRegistry
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class ToolRuntime:
     state: RuntimeState
     guard: SandboxGuard | None = None
     file_state_cache: FileStateCache | None = None
+    registry: ToolRegistry | None = None
     approved_guard_policies: tuple[GuardPolicy, ...] = ()
     tool_call_id: str = ""
 

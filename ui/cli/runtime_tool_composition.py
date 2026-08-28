@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from services.background_tasks import BackgroundTaskManager
 from services.permissions import PermissionPolicy
 from services.subagents.runner import SubagentRunner
-from services.tools.discovery import ToolDiscovery
-from services.tools.registry import ToolRegistry
+from services.tools.registry import ToolExposureConfig, ToolRegistry
 from services.tools.types import ToolDescriptor
 from tools.agent import descriptor as agent_descriptor
 
@@ -29,7 +28,7 @@ class RuntimeToolComposition:
     """Startup-selected tool policy reused by session/model rebuilds."""
 
     base_descriptors: tuple[ToolDescriptor, ...]
-    discovery: ToolDiscovery | None = None
+    exposure_config: ToolExposureConfig = field(default_factory=ToolExposureConfig)
     agent_enabled: bool = True
 
     def build_registry(
@@ -42,7 +41,7 @@ class RuntimeToolComposition:
         registry = ToolRegistry(
             self.base_descriptors,
             permission_policy=permission_policy,
-            discovery=self.discovery,
+            exposure_config=self.exposure_config,
         )
         self.register_runtime_bound_tools(
             registry,

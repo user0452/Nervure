@@ -21,7 +21,6 @@ from services.model.types import LLMResponse, ModelUsage
 from services.model.types import ProviderError
 from services.observability import JsonlTraceSink, TraceRecorder
 from services.tools.executor import ToolExecutionUpdate
-from services.tools.discovery import ToolDiscovery, ToolMetadata
 from services.tools.registry import ToolRegistry
 from services.tools.types import ToolCall, ToolDescriptor, ToolExecutionResult
 
@@ -198,7 +197,7 @@ async def _drain_continuation(loop: AgentLoop) -> None:
         pass
 
 
-def test_top_level_prompt_drives_and_refreshes_tool_discovery(
+def test_top_level_prompt_does_not_filter_provider_tool_schemas(
     tmp_path: Path,
 ) -> None:
     def descriptor(name: str, description: str) -> ToolDescriptor:
@@ -224,13 +223,6 @@ def test_top_level_prompt_drives_and_refreshes_tool_discovery(
             descriptor("grep", "Search text"),
             descriptor("bash", "Execute a shell command"),
             descriptor("browser", "Browse a web page"),
-        ),
-        discovery=ToolDiscovery(
-            (
-                ToolMetadata("read_file", "file safety", True),
-                ToolMetadata("grep", "file safety", True),
-                ToolMetadata("bash", "shell"),
-            )
         ),
     )
     model = FakeModelClient(
@@ -263,9 +255,8 @@ def test_top_level_prompt_drives_and_refreshes_tool_discovery(
     second_names = {
         schema["function"]["name"] for schema in model.snapshots[1].tool_schemas
     }
-    assert first_names == {"read_file", "grep", "bash"}
-    assert second_names == {"read_file", "grep", "bash", "browser"}
-    assert state.metadata["tool_discovery_query"] == "unrelated quantum phrase"
+    assert first_names == {"read_file", "grep", "bash", "browser"}
+    assert second_names == first_names
 
     asyncio.run(_drain_continuation(loop))
 
@@ -273,7 +264,6 @@ def test_top_level_prompt_drives_and_refreshes_tool_discovery(
         schema["function"]["name"] for schema in model.snapshots[2].tool_schemas
     }
     assert continued_names == second_names
-    assert "tool_discovery_query" not in state.metadata
 
 
 def test_loop_stops_without_tool_calls(tmp_path: Path) -> None:

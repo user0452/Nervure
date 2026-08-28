@@ -1,48 +1,60 @@
-"""Lazy tool-schema selection without changing the executor's authority."""
+"""Deterministic metadata search for deferred tool schemas."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable
+import re
 
 from services.tools.types import ToolDescriptor
 
 
-@dataclass(frozen=True)
-class ToolMetadata:
-    name: str
-    category: str = "general"
-    always_visible: bool = False
-
-
 class ToolDiscovery:
-    """Simple lexical retriever for provider-visible schemas.
+    """Rank descriptors using only lightweight provider-safe metadata.
 
-    The registry keeps every descriptor executable for direct runtime calls;
-    discovery only reduces what is rendered into a model request. Empty or
-    low-confidence results fall back to the normal tool set.
+    This class deliberately does not decide which tools a user prompt sees.
+    ``ToolRegistry`` owns exposure policy and calls this retriever only from
+    the explicit ``tool_search`` tool after applying runtime visibility rules.
     """
 
-    def __init__(self, metadata: Iterable[ToolMetadata] = ()) -> None:
-        self._metadata = {item.name: item for item in metadata}
-
-    def select(self, descriptors: tuple[ToolDescriptor, ...], query: str | None) -> tuple[ToolDescriptor, ...]:
-        if not query or not query.strip():
-            return descriptors
-        terms = {part.lower() for part in query.split() if len(part.strip()) >= 2}
+    def rank(
+        self,
+        descriptors: tuple[ToolDescriptor, ...],
+        query: str,
+    ) -> tuple[ToolDescriptor, ...]:
+        terms = _query_terms(query)
         if not terms:
-            return descriptors
-        selected: list[ToolDescriptor] = []
-        matched_relevant_tool = False
-        for descriptor in descriptors:
-            metadata = self._metadata.get(descriptor.name, ToolMetadata(descriptor.name))
-            haystack = " ".join((descriptor.name, descriptor.description, descriptor.search_hint, metadata.category)).lower()
-            is_match = any(term in haystack for term in terms)
-            if is_match:
-                matched_relevant_tool = True
-            if metadata.always_visible or is_match:
-                selected.append(descriptor)
-        return tuple(selected) if matched_relevant_tool else descriptors
+            return ()
 
-    def metadata_for(self, name: str) -> ToolMetadata:
-        return self._metadata.get(name, ToolMetadata(name))
+        scored: list[tuple[int, str, ToolDescriptor]] = []
+        for descriptor in descriptors:
+            score = _score(descriptor, terms)
+            if score > 0:
+                scored.append((score, descriptor.name, descriptor))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return tuple(item[2] for item in scored)
+
+
+def _query_terms(query: str) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                term
+                for term in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", query.lower())
+                if len(term) >= 2
+            }
+        )
+    )
+
+
+def _score(descriptor: ToolDescriptor, terms: tuple[str, ...]) -> int:
+    name = descriptor.name.lower()
+    description = descriptor.description.lower()
+    hint = descriptor.search_hint.lower()
+    score = 0
+    for term in terms:
+        if term in name:
+            score += 6
+        if term in description:
+            score += 3
+        if term in hint:
+            score += 2
+    return score

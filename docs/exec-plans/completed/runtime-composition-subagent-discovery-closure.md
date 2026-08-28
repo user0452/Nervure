@@ -9,10 +9,10 @@ After this work, changing provider through `/connect` will preserve the same pro
 ## Progress
 
 - [x] (2026-08-28) Confirmed a clean `main` worktree at `d1168cd` and read the repository architecture, relevant design documents, active plan, technical-debt tracker, and current implementations.
-- [x] (2026-08-28) Confirmed that `build_runtime()` creates ToolDiscovery and conditionally registers `agent`, while `CliRuntime.with_model_config()` recreates a registry without discovery and always registers `agent`.
+- [x] (2026-08-28) Confirmed the then-current runtime-composition drift around provider-visible tools and startup-selected `agent` registration. This prompt-driven design has since been superseded by the deferred tool-search composition.
 - [x] (2026-08-28) Confirmed that `SubagentRunner` creates ephemeral child stores but gives child `ContextEngine` and `AgentLoop` no compaction service or final budget manager.
-- [x] (2026-08-28) Confirmed that `ToolRegistry` already consumes `state.metadata["tool_discovery_query"]`, but only tests manually populate it; `AgentLoop.stream()` does not manage its lifecycle.
-- [x] (2026-08-28) Centralized provider-visible registry composition and reused it from startup and model reconfiguration, including startup-selected agent enablement and ToolDiscovery.
+- [x] (2026-08-28) Confirmed the former prompt-derived tool exposure protocol before it was superseded.
+- [x] (2026-08-28) Centralized provider-visible registry composition and reused it from startup and model reconfiguration, including startup-selected agent enablement. The composition now retains deferred-exposure configuration instead of a prompt-derived selector.
 - [x] (2026-08-28) Added child-local compaction and final-budget protection with one bounded context-limit recovery and deterministic terminal failure.
 - [x] (2026-08-28) Refreshed Tool Discovery query for each top-level `stream(prompt)` and cleared it for seeded `continue_stream()` flows.
 - [x] (2026-08-28) Added focused regressions and updated the architecture documents; the combined focused group passes with 48 tests.
@@ -46,9 +46,9 @@ After this work, changing provider through `/connect` will preserve the same pro
   Rationale: This preserves the existing compaction architecture and actual parent compaction configuration, and automatically enforces one retry through `RuntimeState.has_attempted_reactive_compact` without mutating the parent store.
   Date/Author: 2026-08-28 / Codex
 
-- Decision: Set `tool_discovery_query` only at the top-level `AgentLoop.stream(prompt)` entry and remove it at `continue_stream()` entry.
-  Rationale: A user prompt should control every model call within that user turn, while seeded child/internal flows must not inherit a stale query from a prior top-level turn.
-  Date/Author: 2026-08-28 / Codex
+- Decision: The former prompt-derived tool exposure design is superseded by explicit deferred tool search.
+  Rationale: Provider schemas now stay fully exposed for small toolsets or are expanded only after the model explicitly invokes `tool_search`; top-level user prompt text never selects schemas.
+  Date/Author: 2026-08-29 / Codex
 
 ## Outcomes & Retrospective
 
@@ -79,9 +79,9 @@ The first full-suite collection exposed the retained private-test import `_subag
 
 ## Context and Orientation
 
-`ui/cli/app.py::build_runtime()` creates service-dependent builtin descriptors, MCP descriptors, ToolDiscovery, the main ToolRegistry, SubagentRunner, executor, context engine, and agent loop. `ui/cli/types.py::CliRuntime.with_model_config()` is used after `/connect`; it must replace model-dependent objects without changing the capability policy selected at startup.
+`ui/cli/app.py::build_runtime()` creates service-dependent builtin descriptors, MCP descriptors, the main ToolRegistry, SubagentRunner, executor, context engine, and agent loop. `ui/cli/types.py::CliRuntime.with_model_config()` is used after `/connect`; it must replace model-dependent objects without changing the capability policy selected at startup.
 
-`services/tools/registry.py` owns the executable descriptor map and derives provider-visible schemas and prompt sections. Its optional `ToolDiscovery` performs deterministic lexical selection, keeps metadata-marked core tools visible, and falls back to the full visible set when no relevant descriptor matches. Discovery does not change executor authority.
+`services/tools/registry.py` owns the executable descriptor map and derives provider-visible schemas and prompt sections. Its deferred exposure policy keeps small toolsets fully visible, and for large/schema-heavy toolsets keeps core tools plus explicit `tool_search` visible until allowed long-tail tools are loaded. Search does not change executor authority.
 
 `services/subagents/runner.py` constructs both ordinary/fork children and skill children. A fork child seeds a deep copy of the last parent `ContextSnapshot` messages plus the child directive, but its store is ephemeral. Today its `ContextEngine` has no context preparer/final budget manager and its `AgentLoop` has no compaction service, so an inherited large snapshot can reach the provider unguarded.
 
@@ -89,11 +89,11 @@ The first full-suite collection exposed the retained private-test import `_subag
 
 ## Plan of Work
 
-First add a small runtime tool-composition object under `ui/cli/` that stores the startup-selected base descriptors, lexical ToolDiscovery instance, and whether the `agent` tool was enabled. It will build a ToolRegistry from the current PermissionPolicy and current SubagentRunner. `build_runtime()` and `with_model_config()` will both call it. `CliRuntime` will retain this composition value so environment switches, MCP descriptors, experimental descriptors, and discovery cannot drift during `/connect`.
+First add a small runtime tool-composition object under `ui/cli/` that stores the startup-selected base descriptors and whether the `agent` tool was enabled. It will build a ToolRegistry from the current PermissionPolicy and current SubagentRunner. `build_runtime()` and `with_model_config()` will both call it. `CliRuntime` retains this composition value so environment switches, MCP descriptors, experimental descriptors, and deferred-exposure configuration cannot drift during `/connect`.
 
 Next give every child runtime its own `ContextCompactionService`, bound to the child `MessageStore`, shared model client, and trace recorder. Child `ContextEngine` will use it as context preparer and final budget manager; child `AgentLoop` will use it for the single existing reactive retry. The parent store is never passed to this service. Fork prompt and schemas remain inherited by their existing providers, read-only and permission semantics stay unchanged, and failure is collapsed by `SubagentRunner` into a deterministic structured context-limit result.
 
-Then update `AgentLoop.stream(prompt)` to replace `state.metadata["tool_discovery_query"]` with the current prompt before context building. Update `continue_stream()` to remove that key before child/internal context building. Keep ToolDiscovery lexical and deterministic; only add minimal normalization if focused Chinese cases prove the existing whitespace tokenizer unusable and a small direct mapping can be justified without creating routing logic.
+The former prompt-derived discovery milestone is superseded: `AgentLoop.stream(prompt)` and `continue_stream()` must not alter tool-exposure state. Explicit `tool_search` performs deterministic lexical ranking only over currently allowed deferred descriptors, then marks matched tools loaded for the following provider snapshot.
 
 Finally update only the architecture documents whose runtime semantics changed, add focused tests to existing test files, run the required focused and full validation, record exact results in this plan, move it to completed, commit, push to `origin/main`, and verify local and remote hashes.
 
@@ -141,4 +141,4 @@ The shared composition helper will expose a small method that receives the curre
 
 Child composition will instantiate the existing `ContextCompactionService` with the ephemeral child store, current model client, and trace recorder, then pass the same instance to `ContextEngine(final_context_budget_manager=...)` and `AgentLoop(compaction_service=...)`. No parent store or parent compaction service may be referenced.
 
-Revision note (2026-08-28): Initial plan created after source audit; decisions reflect the observed startup/reconfiguration drift, existing ephemeral child store, and manual-only ToolDiscovery query path. Completed after focused and full validation; the only validation-time adjustment retained the existing private evaluation-test import through the new shared composition boundary.
+Revision note (2026-08-28): Initial plan created after source audit; decisions reflect the observed startup/reconfiguration drift and existing ephemeral child store. Completed after focused and full validation; the only validation-time adjustment retained the existing private evaluation-test import through the new shared composition boundary. Updated on 2026-08-29 because the former prompt-driven tool selection is superseded by deferred tool search.

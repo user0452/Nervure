@@ -7,8 +7,8 @@
 | 文件 | 职责 |
 |:---|:---|
 | `types.py` | 共享类型：`ToolDescriptor`、`ToolCall`、`ToolExecutionResult`、`ToolRuntime`、`ToolTarget`、`ToolResultPolicy`、`ToolCallClassification`、`ValidationResult`；fail-closed 默认分类器；`is_guard_policy_allowed()` |
-| `registry.py` | `ToolRegistry`：注册/排序、可见性过滤、导出 schema 与 prompt 片段 |
-| `discovery.py` | `ToolDiscovery`：按当前顶层用户请求做简单词法 schema/prompt 裁剪；无可靠匹配时回退完整可见集 |
+| `registry.py` | `ToolRegistry`：注册/排序、权限可见性、全量/延迟 schema 暴露和已加载工具生命周期 |
+| `discovery.py` | `ToolDiscovery`：只按名称、description 与 search_hint 对已允许的 deferred 工具做确定性词法排序 |
 | `schema.py` | `descriptor_to_openai_tool_schema()`：descriptor → OpenAI function schema |
 | `executor.py` | `RegistryToolExecutor`：完整执行管线、guard/permission/hook、并发、结果预算、side effects |
 | `file_state.py` | `FileStateCache`：缓存文件 mtime/内容，供 `write_file` 防竞态、生成 diff |
@@ -41,9 +41,16 @@ handler 入参：`state`、`guard`、`file_state_cache`、`approved_guard_polici
 
 ### ToolRegistry
 
-`visible_descriptors(state)` 是 schema 与 prompt 的共同入口，可见性来源：registry 构造期的 `disabled_tools`/`denied_tools`、`state.metadata` 中的 `disabled_tools`/`denied_tools`/`hidden_tools`、注入的 `PermissionPolicy.is_tool_visible()`。被隐藏/禁用/拒绝的工具不进入 `tool_schemas(state)` 或 `tool_prompt_sections(state)`。
+`allowed_descriptors(state)` 是权限可见性的共同入口。它先应用 registry 构造期的 `disabled_tools`/`denied_tools`、`state.metadata` 中的 `disabled_tools`/`denied_tools`/`hidden_tools`，再应用注入的 `PermissionPolicy.is_tool_visible()`。被隐藏、禁用或拒绝的工具不会进入 `tool_schemas(state)`、`tool_prompt_sections(state)` 或 `tool_search` 的候选结果。
 
-可选 `ToolDiscovery` 只在上述权限可见集之后进一步裁剪 provider-visible schemas 和 prompt sections，不删除 registry descriptor，也不改变 `get()` 或 executor authority。`AgentLoop.stream(prompt)` 在每个新顶层用户 turn 开始时把当前 prompt 写入 `tool_discovery_query`，覆盖上一轮；`continue_stream()` 在 seeded child/internal flow 开始时删除该键。词法选择没有匹配到相关工具时回退完整权限可见集，metadata 标为 always-visible 的核心文件工具始终保留。
+`visible_descriptors(state)` 是 provider schema 与 prompt 的共同投影入口，并有两种暴露模式：
+
+- 小工具集模式：允许的普通工具数量不超过 30，且完整 provider schema 的保守序列化 token 估算不超过 12,000 时，所有普通工具直接可见。`tool_search` 不需要也不显示。
+- 延迟模式：普通工具数量超过 30，或完整 schema 超过 12,000 估算 tokens 时，只显示六个核心 Coding Agent 工具（`read_file`、`grep`、`glob`、`edit_file`、`write_file`、`bash`）、已启用的 `agent`、`tool_search`，以及当前会话已经加载的 deferred 工具。MCP 和其他长尾工具默认留在 registry 中可执行，但完整 schema 不进入 provider context。
+
+阈值由不可变 `ToolExposureConfig` 配置，默认的每次搜索候选上限是 5，加载后的 schema 硬上限同为 12,000 估算 tokens。估算复用 `services.compaction.token_estimator.estimate_serialized_tokens()` 的保守 JSON 序列化规则，不创建独立的上下文预算系统。若新候选会越过硬上限，registry 只加载仍然装得下的候选；它不实行 LRU 或淘汰已有工具。
+
+`tool_search(query)` 是一个普通 `ToolDescriptor`，由 `RegistryToolExecutor` 走现有 input validation、classification、guard、permission、hook 和结果管线。它只从当前允许且未初始暴露的 deferred descriptors 中按名称、description、`search_hint` 检索。成功后会把实际加载的名称保存到当前会话 `RuntimeState.metadata["deferred_tool_search_loaded"]`；下一次 `ContextEngine` 构建 snapshot 时，这些工具的完整 schema 才出现。无匹配会返回普通空结果，绝不会退化为暴露完整 deferred catalog。延迟/未加载只表示“不在 provider schema 中”，不改变 executor、SandboxGuard 或 PermissionPolicy 的授权事实。
 
 ## 核心数据流
 

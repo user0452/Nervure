@@ -84,7 +84,6 @@ from services.subagents.runner import SubagentRunner
 from services.tasks import TaskStore
 from services.tools.executor import RegistryToolExecutor
 from services.tools.file_state import FileStateCache
-from services.tools.discovery import ToolDiscovery, ToolMetadata
 from tools.ask_user_question import descriptor as ask_user_question_descriptor
 from tools.bash import descriptor as bash_descriptor
 from tools.background_task_stop import descriptor as background_task_stop_descriptor
@@ -101,6 +100,7 @@ from tools.task_create import descriptor as task_create_descriptor
 from tools.task_get import descriptor as task_get_descriptor
 from tools.task_list import descriptor as task_list_descriptor
 from tools.task_update import descriptor as task_update_descriptor
+from tools.tool_search import descriptor as tool_search_descriptor
 from tools.write_file import descriptor as write_file_descriptor
 from ui.cli import renderer
 from ui.cli.input import ConfirmOption, read_confirm_sync
@@ -348,22 +348,11 @@ def build_runtime(
         enter_plan_mode_descriptor(plan_store),
         exit_plan_mode_descriptor(plan_store),
         ask_user_question_descriptor(user_question_prompter),
+        tool_search_descriptor(),
         *mcp_descriptors,
-    )
-    tool_discovery = ToolDiscovery(
-        (
-            ToolMetadata("read_file", "file safety", True),
-            ToolMetadata("glob", "file safety", True),
-            ToolMetadata("grep", "file safety", True),
-            ToolMetadata("bash", "shell"),
-            ToolMetadata("repo_map", "repository exploration"),
-            ToolMetadata("symbol_search", "repository exploration"),
-            ToolMetadata("skill", "capability"),
-        )
     )
     tool_composition = RuntimeToolComposition(
         base_descriptors=base_descriptors,
-        discovery=tool_discovery,
         agent_enabled=not _subagent_disabled(),
     )
     registry = tool_composition.build_registry(

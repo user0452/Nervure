@@ -206,7 +206,6 @@ class AgentLoop:
         attachments: Iterable[dict[str, Any]] | None = None,
     ) -> AsyncIterator[AgentEvent]:
         self.state.status = RunStatus.RUNNING
-        self.state.metadata["tool_discovery_query"] = prompt
         if (
             self.state.interaction is not None
             and self.state.interaction.kind.value in {"plan_review", "user_interrupt"}
@@ -248,7 +247,6 @@ class AgentLoop:
         """Continue from messages already seeded into the message store."""
 
         self.state.status = RunStatus.RUNNING
-        self.state.metadata.pop("tool_discovery_query", None)
         user_turn_id = self.state.begin_user_turn()
         try:
             with self.trace_recorder.span(
