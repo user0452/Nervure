@@ -201,11 +201,12 @@ class ContextCompactionService:
             return False
         messages = self._active_messages()
         try:
+            raw_snapshot = await self._raw_compact_parent_snapshot(messages, state)
             await self._full_compact(
                 messages,
                 state,
                 trigger=CompactionTrigger.AUTO_FULL,
-                parent_snapshot=snapshot,
+                parent_snapshot=raw_snapshot,
             )
         except Exception as exc:
             _increment_auto_compact_failures(state)
@@ -219,6 +220,26 @@ class ContextCompactionService:
             return False
         _reset_auto_compact_failures(state)
         return True
+
+    def validate_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> None:
+        """Reject a fully projected request that still exceeds the trigger."""
+
+        projected_tokens = estimate_snapshot_tokens(snapshot)
+        state.metadata["final_projected_context_tokens"] = projected_tokens
+        if projected_tokens >= self.config.auto_compact_threshold_tokens:
+            raise ProviderError(
+                "Final projected context remains over budget after compaction.",
+                error_type="context_limit_exceeded",
+                metadata={
+                    "source": "final_context_budget",
+                    "projected_tokens": projected_tokens,
+                    "threshold": self.config.auto_compact_threshold_tokens,
+                },
+            )
 
     async def manual_compact(
         self,
@@ -385,6 +406,14 @@ class ContextCompactionService:
         # Safe startup/recovery fallback: use cheap projected messages and no
         # synthetic system/tools. The normal path always prefers the real
         # parent request snapshot for prompt-cache reuse.
+        prepared = await self.prepare_for_model(messages, state)
+        return ContextSnapshot(system_prompt="", messages=prepared.messages)
+
+    async def _raw_compact_parent_snapshot(
+        self,
+        messages: tuple[dict[str, Any], ...],
+        state: RuntimeState,
+    ) -> ContextSnapshot:
         prepared = await self.prepare_for_model(messages, state)
         return ContextSnapshot(system_prompt="", messages=prepared.messages)
 

@@ -198,7 +198,14 @@ def _stored_path(path: Path, workspace: Path) -> str:
 
 def _resolve_stored_path(value: str, workspace: Path) -> Path:
     path = Path(value)
-    return (path if path.is_absolute() else workspace / path).resolve(strict=False)
+    resolved = (path if path.is_absolute() else workspace / path).resolve(strict=False)
+    try:
+        resolved.relative_to(workspace.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"Session state path is outside the current workspace: {value}"
+        ) from exc
+    return resolved
 
 
 def _file_hash(path: Path) -> str:

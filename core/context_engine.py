@@ -45,6 +45,14 @@ class FinalContextBudgetManager(Protocol):
         """Return True when the underlying transcript was compacted."""
         ...
 
+    def validate_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> None:
+        """Raise when a fully projected snapshot remains over budget."""
+        ...
+
 
 class NoOpContextPreparer:
     def prepare(
@@ -99,14 +107,14 @@ class ContextEngine:
 
     async def build_for_model(self, state: RuntimeState) -> ContextSnapshot:
         snapshot = await self._build_once(state)
-        if (
-            self._final_context_budget_manager is not None
-            and await self._final_context_budget_manager.ensure_final_context_budget(
+        budget_manager = self._final_context_budget_manager
+        if budget_manager is not None:
+            if await budget_manager.ensure_final_context_budget(
                 snapshot,
                 state,
-            )
-        ):
-            snapshot = await self._build_once(state)
+            ):
+                snapshot = await self._build_once(state)
+            budget_manager.validate_final_context_budget(snapshot, state)
         return snapshot
 
     async def _build_once(self, state: RuntimeState) -> ContextSnapshot:

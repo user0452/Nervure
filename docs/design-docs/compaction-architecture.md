@@ -76,7 +76,7 @@ flowchart TD
 
 `prepare()` 先跑 cheap pipeline，若 `token_after ≥ auto_compact_threshold`（默认 102,400）且当前不是 compact 子 agent 调用，则尝试 `maybe_auto_compact`。连续 auto compact 失败 ≥ 3 次（`max_consecutive_auto_compact_failures`）后跳过自动压缩。reactive compact 由 loop 在 `context_limit_exceeded` 时触发（最多 `max_reactive_compact_retries` 次）。
 
-主 CLI 的 `ContextEngine` 还会在附件、相关记忆、system prompt 和 tool schemas 全部投影后调用 `ensure_final_context_budget()`。若完整 snapshot 超过阈值，service 使用该 snapshot 生成摘要，但只改写底层 transcript，然后由 engine 重建一次；临时附件和记忆投影不会永久写入 compact 后的消息链。
+主 CLI 的 `ContextEngine` 还会在附件、相关记忆、system prompt 和 tool schemas 全部投影后调用 `ensure_final_context_budget()`。完整 snapshot 只用于预算判断；超过阈值时，service 基于 raw transcript 的廉价投影生成摘要并改写底层消息链，然后由 engine 重新执行一次完整投影。重建后的 snapshot 会再次校验，仍超过阈值时直接报告 `context_limit_exceeded`，不会继续交给普通 Provider 调用。临时附件和记忆投影不会进入摘要或 compact 后的持久消息链。
 
 ### Full Compact 与稳定前缀
 

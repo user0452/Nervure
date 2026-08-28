@@ -15,6 +15,8 @@
 - [x] (2026-08-28) 实现 `/undo` 和 session validation metadata，完成安全恢复语义。
 - [x] (2026-08-28) 补齐运行状态、取消、截断恢复耗尽、最终上下文预算和后台任务通知语义。
 - [x] (2026-08-28) 完成聚焦测试、一次最终完整测试和静态边界检查：`766 passed`，`compileall`、import boundaries、`git diff --check` 均通过。
+- [x] (2026-08-28) 完成 closure follow-up：persistent TTY 保留 Error/PARTIAL notice；final budget 改为 raw compact + 重建后拒绝；runtime replacement 重绑 UI bridge；异步退出持久化状态；resume 拒绝 workspace 外 metadata 路径。
+- [x] (2026-08-28) follow-up 验证完成：`771 passed in 15.12s`，`compileall` 与 `git diff --check` 通过。
 
 ## Surprises & Discoveries
 
@@ -22,6 +24,8 @@
 - executor 已有修改前 checkpoint 机制，但创建失败后仍继续调用写工具，无法保证“先快照再修改”。
 - 当前上下文 preparer 链在附件和长期记忆投影之前做自动压缩，最终发给模型的完整 snapshot 没有预算闭环。
 - Ctrl+C 取消目前被写成 `USER_INTERRUPT` 交互暂停，混淆了取消和 HITL。
+- persistent TTY 主路径没有复用旧 `stream_view` 的 `error_text` 渲染，因此 reducer 已记录的 Error/PARTIAL 提示仍会丢失。
+- runtime replacement 只刷新 terminal completer，没有迁移 `BackgroundTaskManager` notifier；`consume_events()` 还在清理 active state 后错误地返回 `None`。
 
 ## Decision Log
 
@@ -30,6 +34,7 @@
 - 2026-08-28：`/resume` 始终可以恢复 transcript；只有 workspace、git、文件哈希、指令、工具配置和权限模式均匹配时才标记 `SAFE_RESUME`。工作区分歧会清空旧文件状态，配置分歧标记 `STALE_CONTEXT`。
 - 2026-08-28：扩展现有 `RuntimeState` 的 `RunStatus`，不新建第二套状态机；transition reason 继续单独表示控制流原因。
 - 2026-08-28：最终预算检查由 `ContextEngine` 在完整 snapshot 上调用现有 compaction service；若压缩了底层 transcript，只允许重建一次，临时附件和记忆投影不写回消息存储。
+- 2026-08-28：follow-up 将完整 snapshot 限定为预算判断输入；摘要仅基于 raw transcript，重建后必须再次通过同一阈值，压缩失败或重建仍超量均不得继续普通 Provider 调用。
 - 2026-08-28：遵照用户要求避免过度测试，只为每个关键闭环增加一个直接回归测试；完整测试仅在基线和最终各运行一次。
 
 ## Context and Orientation
@@ -75,6 +80,10 @@ session-local `session_state.json` 记录 workspace、Git HEAD、指令指纹、
 `RuntimeState` 现有状态对象增加 `IDLE / RUNNING / WAITING_USER / COMPLETED / PARTIAL / FAILED / CANCELLED`，取消不再伪装成 HITL。max-output 恢复耗尽会保留最终文本、标记 `PARTIAL` 并在 TTY/batch 显示提示。完整 context snapshot 在附件、记忆、system prompt 和 tool schemas 投影后再检查预算，只压缩底层 transcript 并最多重建一次。
 
 后台 agent 已透传 profile；terminal state 会立即追加提示，同时不消费下一轮 background attachment notification，也不自动唤醒父 agent。
+
+follow-up 进一步把 reducer 的 `error_text` 接入 persistent TTY active view 和 transcript notice，修正 `consume_events()` 的终态返回；runtime 替换统一重绑后台 notifier，退出统一解绑，避免未配置启动后 `/connect` 丢失即时通知，也避免 `/exit` 清空 runtime 后的尾部解引用。异步 shutdown 现在与同步路径一致地保存 session validation state；resume 会拒绝 metadata 中 workspace 外的绝对路径或相对逃逸路径。
+
+最终上下文预算 follow-up 不再用包含 Memory/Attachment 的完整投影生成摘要，而是只压缩 raw transcript 的廉价投影；随后重新走完整投影，并在任何 Provider 调用前再次校验。仍超预算时返回明确的上下文错误。
 
 最终验证：基线 `758 passed`；实现后 `766 passed in 17.12s`；`uv run python -m compileall -q core services infrastructure tools ui`、`tests/test_import_boundaries.py` 和 `git diff --check` 通过。生产 smoke test 使用真实 `build_runtime()`，按要求只 mock 外部 provider/MCP 边界。本 pass 未执行真实 provider 或真实 MCP server 的联网端到端测试，这是有意保留的外部验证边界，不是本地 runtime closure 缺口。
 

@@ -333,6 +333,7 @@ class PersistentTerminalApp:
         if self._active_state is None:
             self.begin_turn()
         assert self._active_state is not None
+        state = self._active_state
         try:
             async for event in events:
                 event_type = getattr(event, "type", None)
@@ -344,7 +345,7 @@ class PersistentTerminalApp:
                 self.invalidate()
         finally:
             self._finish_turn()
-        return self._active_state
+        return state
 
     def _remember_turn_text(self, event: Any, text: str) -> None:
         metadata = getattr(event, "metadata", None) or {}
@@ -412,6 +413,10 @@ class PersistentTerminalApp:
                     self._transcript.append(
                         _TranscriptEntry("assistant", text=payload.text)  # type: ignore[union-attr]
                     )
+            if state.error_text:
+                self._transcript.append(
+                    _TranscriptEntry("notice", text=state.error_text)
+                )
         self._active_state = None
         self._active_activity_groups = {}
         self._turn_texts = []
@@ -647,6 +652,12 @@ class PersistentTerminalApp:
                     self._assistant_fragments(fragments, payload)
                 else:
                     self._assistant_fragments(fragments, payload.text)
+            if self._active_state.error_text:
+                self._line(
+                    fragments,
+                    "class:status",
+                    self._active_state.error_text,
+                )
         return FormattedText(fragments)
 
     def _user_fragments(self, fragments: list[tuple], text: str) -> None:

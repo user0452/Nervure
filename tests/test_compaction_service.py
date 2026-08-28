@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+import pytest
+
 from core.runtime_state import RuntimeState
 from core.context_engine import ContextEngine
 from services.compaction import ContextCompactionService
@@ -11,6 +13,7 @@ from services.context.current_model_context import CurrentModelContext
 from services.context.snapshot import ContextSnapshot
 from services.model.stream import ModelStreamEvent
 from services.model.types import LLMResponse, ModelUsage
+from services.model.types import ProviderError
 from utils.toolResultStorage import ToolResultStorage
 from services.compaction.service import MICROCOMPACT_PLACEHOLDER
 from services.compaction.types import CompactionConfig, CompactionTrigger
@@ -78,9 +81,21 @@ def test_final_budget_compacts_raw_transcript_not_synthetic_projection(tmp_path)
     compacted = asyncio.run(service.ensure_final_context_budget(snapshot, state))
 
     assert compacted is True
+    compact_request = model.snapshots[0]
+    assert compact_request.system_prompt == ""
+    assert compact_request.tool_schemas == ()
+    assert all(message.get("attachment") is None for message in compact_request.messages)
+    assert "attachment " not in str(compact_request.messages)
     stored = message_store.current_messages()
     assert all(message.get("attachment") != {"type": "file"} for message in stored)
     assert any(message.get("metadata", {}).get("is_compact_summary") for message in stored)
+
+    rebuilt = ContextSnapshot(
+        system_prompt="system " * 100,
+        messages=message_store.current_messages(),
+    )
+    with pytest.raises(ProviderError, match="remains over budget"):
+        service.validate_final_context_budget(rebuilt, state)
 
 
 def test_prepare_for_model_persists_large_tool_results_before_projection(tmp_path) -> None:

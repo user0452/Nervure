@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from core.runtime_state import RuntimeState
@@ -236,6 +237,25 @@ def test_resume_invalidates_file_state_when_workspace_diverged(tmp_path: Path) -
     assert "files_read" not in result.runtime.state.metadata
     assert result.runtime.tool_executor.file_state_cache.get(target) is None
     assert result.runtime.message_store.current_messages()[0]["content"] == "restore this"
+
+
+def test_resume_rejects_session_state_paths_outside_workspace(tmp_path: Path) -> None:
+    write_transcript(tmp_path, "session-old")
+    state_path = SessionStateStore(
+        session_messages_path(tmp_path, "session-old").parent
+    ).path
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    payload["file_hashes"] = {str(tmp_path.parent / "outside.txt"): "<missing>"}
+    state_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    result = dispatch_command(make_runtime(tmp_path), "/resume session-old")
+
+    assert result.runtime is None
+    output = strip_ansi(renderer.render_to_text(result.renderable))
+    assert "outside the current workspace" in output
 
 
 def test_resume_missing_target_keeps_current_runtime(

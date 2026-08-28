@@ -226,6 +226,60 @@ def test_progress_text_is_rendered_before_its_turn_activity(tmp_path: Path) -> N
     assert completed.index("定位到了，接下来修改对应逻辑") < completed.index("Edit target.py")
 
 
+def test_error_event_is_visible_and_committed_as_notice(tmp_path: Path) -> None:
+    app = PersistentTerminalApp(
+        make_runtime(tmp_path),
+        interaction_host=TerminalInteractionHost(),
+        on_submit=lambda _text: asyncio.sleep(0),
+        on_exit=lambda: asyncio.sleep(0),
+        output=DummyOutput(),
+    )
+    app.begin_turn()
+    state = app._active_state  # noqa: SLF001
+    assert state is not None
+    reduce_stream_event(state, AgentEvent(type="error", text="Provider request failed."))
+
+    active = "".join(fragment[1] for fragment in app._render_transcript())  # noqa: SLF001
+    assert "Provider request failed." in active
+
+    app._finish_turn()  # noqa: SLF001
+    notices = [
+        entry.text
+        for entry in app._transcript  # noqa: SLF001
+        if entry.kind == "notice"
+    ]
+    assert notices == ["Provider request failed."]
+
+
+def test_partial_completed_event_preserves_answer_and_notice(tmp_path: Path) -> None:
+    app = PersistentTerminalApp(
+        make_runtime(tmp_path),
+        interaction_host=TerminalInteractionHost(),
+        on_submit=lambda _text: asyncio.sleep(0),
+        on_exit=lambda: asyncio.sleep(0),
+        output=DummyOutput(),
+    )
+
+    async def events():
+        yield AgentEvent(
+            type="completed",
+            text="partial answer",
+            metadata=_meta(
+                "ac-partial",
+                1,
+                status="partial",
+                notice="Generation was truncated; partial response was preserved.",
+            ),
+        )
+
+    state = asyncio.run(app.consume_events(events()))
+
+    assert state.error_text == "Generation was truncated; partial response was preserved."
+    rendered = "".join(fragment[1] for fragment in app._render_transcript())  # noqa: SLF001
+    assert "partial answer" in rendered
+    assert "Generation was truncated; partial response was preserved." in rendered
+
+
 def test_persistent_app_uses_full_screen_shell_and_separates_user_turns(
     tmp_path: Path,
 ) -> None:

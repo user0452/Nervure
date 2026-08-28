@@ -29,6 +29,7 @@ from prompt_toolkit.output import DummyOutput
 from rich.console import Console
 from rich.text import Text
 
+from services.background_tasks import BackgroundTaskManager
 from ui.cli.terminal import static_output as so
 from ui.cli.terminal import repl as repl_module
 from ui.cli.terminal import transient
@@ -645,6 +646,48 @@ def test_connect_success_resets_main_view_with_new_model(
     assert repl._prompt is not old_prompt
     assert "deepseek-chat" in output
     assert "已连接到 DeepSeek" in output
+
+
+def test_runtime_replacement_rebinds_background_terminal_notifier(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    old_manager = BackgroundTaskManager(workspace=tmp_path)
+    new_manager = BackgroundTaskManager(workspace=tmp_path)
+    runtime = replace(make_runtime(tmp_path), background_task_manager=old_manager)
+    new_runtime = replace(
+        make_runtime(tmp_path / "new"),
+        background_task_manager=new_manager,
+    )
+    repl = InlineRepl(runtime)
+    notices: list[str] = []
+    assigned: list[object] = []
+    repl._terminal_app = SimpleNamespace(  # type: ignore[assignment]  # noqa: SLF001
+        append_notice=notices.append,
+        set_runtime=assigned.append,
+    )
+    repl._bind_runtime_ui_bridges()  # noqa: SLF001
+
+    async def fake_connect_flow() -> CommandResult:
+        return CommandResult(runtime=new_runtime)
+
+    monkeypatch.setattr(repl, "_run_connect_flow", fake_connect_flow)
+
+    asyncio.run(repl._handle_command("/connect"))
+
+    assert assigned == [new_runtime]
+    assert old_manager._terminal_notifier is None  # noqa: SLF001
+    assert new_manager._terminal_notifier == notices.append  # noqa: SLF001
+
+
+def test_async_shutdown_persists_session_state(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path)
+    persisted: list[bool] = []
+    runtime.persist_session_state = lambda: persisted.append(True)  # type: ignore[method-assign]
+
+    asyncio.run(InlineRepl(runtime)._shutdown_async())
+
+    assert persisted == [True]
 
 
 # --- M4: streaming session ------------------------------------------------

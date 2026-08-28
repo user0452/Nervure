@@ -109,10 +109,7 @@ class InlineRepl:
             on_cancel=self._cancel_current_turn,
         )
         self._terminal_app.append_banner()
-        if self._runtime.background_task_manager is not None:
-            self._runtime.background_task_manager.bind_terminal_notifier(
-                self._terminal_app.append_notice
-            )
+        self._bind_runtime_ui_bridges()
         if not self._runtime.configured:
             self._terminal_app.append_notice(
                 "⚠ 尚未配置供应商。请输入 /connect 进行配置。"
@@ -120,8 +117,7 @@ class InlineRepl:
         try:
             await self._terminal_app.run()
         finally:
-            if self._runtime.background_task_manager is not None:
-                self._runtime.background_task_manager.bind_terminal_notifier(None)
+            self._unbind_runtime_ui_bridges()
 
     async def _handle_terminal_submission(self, text: str) -> None:
         """Dispatch one line submitted by the persistent application."""
@@ -157,9 +153,11 @@ class InlineRepl:
         elif result.interaction == "connect":
             result = await self._run_connect_flow()
         if result.runtime is not None:
+            previous_runtime = self._runtime
             self._runtime = result.runtime
             if self._terminal_app is not None:
                 self._terminal_app.set_runtime(self._runtime)
+            self._bind_runtime_ui_bridges(previous_runtime=previous_runtime)
             self._reset_prompt_session()
         if result.reset_main_view:
             self._reset_main_view(result.renderable)
@@ -187,6 +185,7 @@ class InlineRepl:
         if result.attachments:
             self._pending_attachments.extend(result.attachments)
         if result.should_exit:
+            self._unbind_runtime_ui_bridges()
             await self._shutdown_async()
             self._runtime = None
             if self._terminal_app is not None and self._terminal_app.app.is_running:
@@ -521,6 +520,32 @@ class InlineRepl:
 
     # --- shutdown ---------------------------------------------------------
 
+    def _bind_runtime_ui_bridges(
+        self,
+        *,
+        previous_runtime: CliRuntime | None = None,
+    ) -> None:
+        if (
+            previous_runtime is not None
+            and previous_runtime.background_task_manager is not None
+        ):
+            previous_runtime.background_task_manager.bind_terminal_notifier(None)
+        if (
+            self._terminal_app is not None
+            and self._runtime is not None
+            and self._runtime.background_task_manager is not None
+        ):
+            self._runtime.background_task_manager.bind_terminal_notifier(
+                self._terminal_app.append_notice
+            )
+
+    def _unbind_runtime_ui_bridges(self) -> None:
+        if (
+            self._runtime is not None
+            and self._runtime.background_task_manager is not None
+        ):
+            self._runtime.background_task_manager.bind_terminal_notifier(None)
+
     def _shutdown(self) -> None:
         """Synchronous shutdown used only outside an active event loop."""
         runtime = self._runtime
@@ -546,6 +571,7 @@ class InlineRepl:
         runtime = self._runtime
         if runtime is None:
             return
+        runtime.persist_session_state()
         runtime.message_store.flush_transcript()
         runtime.trace_recorder.flush()
         runtime.error_log_recorder.flush()

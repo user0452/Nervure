@@ -56,6 +56,7 @@ class MetadataPreparer:
 class CompactOnce:
     def __init__(self) -> None:
         self.snapshots: list[ContextSnapshot] = []
+        self.validated: list[ContextSnapshot] = []
 
     async def ensure_final_context_budget(
         self,
@@ -64,6 +65,13 @@ class CompactOnce:
     ) -> bool:
         self.snapshots.append(snapshot)
         return len(self.snapshots) == 1
+
+    def validate_final_context_budget(
+        self,
+        snapshot: ContextSnapshot,
+        state: RuntimeState,
+    ) -> None:
+        self.validated.append(snapshot)
 
 
 def test_context_engine_rebuilds_snapshot_from_current_messages(
@@ -212,4 +220,5 @@ def test_context_engine_checks_complete_projection_then_rebuilds_once(
     assert manager.snapshots[0].messages[-1]["content"] == "prepared"
     assert manager.snapshots[0].system_prompt.startswith("session=")
     assert manager.snapshots[0].tool_schemas[0]["name"] == "fake_tool"
+    assert manager.validated == [snapshot]
     assert snapshot.messages[-1]["content"] == "prepared"

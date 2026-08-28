@@ -112,7 +112,7 @@ flowchart LR
 | `tool_call_ready` / `tool_started` / `tool_progress` | reducer 维护 `state.tools`（queued / running），记录 `tool_call_id → assistant_call_id` 和 `tool_call_id → declared_index` 映射；view 在 body 显示 `tool: <name>` 列表；状态行显示 `tool: <name>` 或 `tools: N running`（**不会**显示裸 `thinking…`） |
 | `tool_result` | reducer 更新对应 ActivityToolCall 的完成/错误状态；结果正文仍由普通 transcript/trace 路径持有，不灌入 Activity 明细。 |
 | `completed` | reducer 翻 `turn_completed`；如果 `streaming_text` 仍有残留（例如 provider 没发 `assistant_message_completed`），兜底 commit 一次并清空。已完成 commit 不会重复打印。 |
-| `error` | reducer 写入 `state.error_text`，view 在 body 尾部显示；coordinator 不再为 error 打印额外块。 |
+| `error` | reducer 写入 `state.error_text`；active turn 在 body 尾部显示，turn 收尾时作为 notice 留在 persistent transcript。 |
 
 turn 完成后 Activity 与 assistant 文本提交到 persistent transcript，应用继续保留输入框。Esc 只取消当前 submit task，不销毁 render owner；HITL modal 活跃时由 interaction host 优先消费取消键。
 
@@ -202,6 +202,7 @@ TTY：`TerminalInteractionHost` 使用可擦除临时 permission modal，只消�
 ### 错误处理
 
 `_run_turn` 异常写 `source=cli_main_loop`；退出时 flush transcript/trace/errors 并关闭 MCP。
+同步和异步退出路径都会先持久化 session validation state。每次 `/connect`、`/resume` 或 `/clear` 替换 runtime 后，REPL 都会重新绑定 runtime 到 terminal 的后台任务即时通知桥；退出时统一解除绑定。resume metadata 中的文件路径在读取前会规范化并限制在当前 workspace 内。
 
 ## 当前限制
 
