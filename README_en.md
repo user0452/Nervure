@@ -7,8 +7,6 @@
   <img src="docs/assets/logo.svg" alt="Logo" width="200" />
 </p>
 
-![Demo](docs/assets/demo.gif)
-
 Nervure is a **CodeAgent** built around the engineering philosophy of a **Harness**. It treats the large language model as an executor with tool-calling capabilities, while a stable and controllable engineering framework constrains, organizes, and absorbs its side effects. This allows AI to complete long-horizon coding tasks reliably in real environments without losing control or crossing boundaries.
 
 ---
