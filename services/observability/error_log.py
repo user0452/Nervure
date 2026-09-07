@@ -76,8 +76,8 @@ class JsonlErrorLogSink:
         return self.session_dir / "errors.jsonl"
 
     def switch_session(self, session_id: str) -> None:
-        self.flush()
         with self._lock:
+            self.flush()
             self.session_id = session_id
 
     def emit(self, record: Mapping[str, Any]) -> None:
@@ -96,15 +96,15 @@ class JsonlErrorLogSink:
                 self._flush_timer.cancel()
                 self._flush_timer = None
 
-        if not lines:
-            return
+            if not lines:
+                return
 
-        try:
-            self.session_dir.mkdir(parents=True, exist_ok=True)
-            with self.error_log_path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write("\n".join(lines) + "\n")
-        except OSError:
-            self.dropped_count += len(lines)
+            try:
+                self.session_dir.mkdir(parents=True, exist_ok=True)
+                with self.error_log_path.open("a", encoding="utf-8", newline="\n") as handle:
+                    handle.write("\n".join(lines) + "\n")
+            except OSError:
+                self.dropped_count += len(lines)
 
     def _enqueue_line(self, line: str) -> None:
         with self._lock:

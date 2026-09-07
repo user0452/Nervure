@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import AsyncIterator
 from time import perf_counter
 from typing import TypeVar
@@ -27,8 +28,8 @@ async def stream_with_wall_clock_deadline(
     otherwise-valid events forever. Only progress counts are recorded.
     """
 
-    if timeout_seconds <= 0:
-        raise ValueError("model call timeout must be positive")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("model call timeout must be finite and positive")
 
     started_at = perf_counter()
     text_chars = 0

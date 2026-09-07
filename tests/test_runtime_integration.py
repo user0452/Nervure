@@ -58,7 +58,7 @@ class SequencedTransport:
                 for index, tool_call in enumerate(message["tool_calls"])
             ]
             finish_reason = finish_reason or "tool_calls"
-        yield {"choices": [{"delta": delta, "finish_reason": finish_reason}]}
+        yield {"choices": [{"delta": delta, "finish_reason": finish_reason or "stop"}]}
 
 
 def make_config() -> ResolvedProviderConfig:

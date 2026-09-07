@@ -78,8 +78,8 @@ class JsonlTranscriptStore:
         - session_id: 新的会话 UUID。切换只改变后续写入路径，不删除旧文件。
         """
 
-        self.flush()
         with self._lock:
+            self.flush()
             self.session_id = session_id
 
     def append_message(
@@ -97,18 +97,19 @@ class JsonlTranscriptStore:
         - parent_uuid: 上一条 transcript record 的 UUID，用于建立线性消息链。
         """
 
-        record_message = self._message_for_record(message)
-        record = {
-            "type": "message",
-            "uuid": message_uuid,
-            "parent_uuid": parent_uuid,
-            "session_id": self.session_id,
-            "timestamp": _utc_timestamp(),
-            "cwd": str(self.cwd),
-            "message": record_message,
-        }
-        line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-        self._enqueue_line(line)
+        with self._lock:
+            record_message = self._message_for_record(message)
+            record = {
+                "type": "message",
+                "uuid": message_uuid,
+                "parent_uuid": parent_uuid,
+                "session_id": self.session_id,
+                "timestamp": _utc_timestamp(),
+                "cwd": str(self.cwd),
+                "message": record_message,
+            }
+            line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            self._enqueue_line(line)
 
     def load_messages(self) -> tuple[LoadedTranscriptMessage, ...]:
         """从当前 session 的 JSONL 文件恢复内部消息列表。
@@ -117,7 +118,11 @@ class JsonlTranscriptStore:
         未知角色会被跳过。外置工具结果存在时会重新读回完整 content。
         """
 
-        self.flush()
+        with self._lock:
+            self.flush()
+            return self._load_messages()
+
+    def _load_messages(self) -> tuple[LoadedTranscriptMessage, ...]:
         if not self.messages_path.exists():
             return ()
 
@@ -165,18 +170,19 @@ class JsonlTranscriptStore:
         """
 
         with self._lock:
-            lines = self._pending_lines
-            self._pending_lines = []
             if self._flush_timer is not None:
                 self._flush_timer.cancel()
                 self._flush_timer = None
 
-        if not lines:
-            return
+            if not self._pending_lines:
+                return
 
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        with self.messages_path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write("\n".join(lines) + "\n")
+            # Keep session selection and disk writes in the same critical
+            # section. Clear the queue only after a successful write/close.
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+            with self.messages_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write("\n".join(self._pending_lines) + "\n")
+            self._pending_lines.clear()
 
     def _message_for_record(self, message: dict[str, Any]) -> dict[str, Any]:
         record_message = deepcopy(message)

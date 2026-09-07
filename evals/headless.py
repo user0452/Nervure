@@ -22,9 +22,9 @@ class HarborWorkspacePermissionPrompter:
     """Approve interactive permission requests in the non-interactive eval host.
 
     ``PermissionPolicy`` invokes this only after guard checks and project-level
-    denies have run.  The runtime still has ``/workspace`` as its sandbox
-    boundary, so this is not a general bypass for the host filesystem; it
-    replaces the CLI's EOF-as-deny behavior inside a Harbor task container.
+    denies have run. This replaces the CLI's EOF-as-deny behavior only inside
+    a Harbor task container. Path guards and a working directory are not OS
+    isolation; this prompter must not be used as a host-machine sandbox.
     """
 
     async def request_permission(self, request) -> PermissionResponse:
@@ -70,18 +70,23 @@ async def run_headless(
 
 async def _consume_stream(runtime, prompt: str, attachments) -> str:
     final_text = ""
+    completed = False
     async for event in runtime.loop.stream(prompt, attachments=attachments):
+        if event.type in {"error", "suspended"}:
+            raise RuntimeError(f"Nervure eval did not complete: {event.type}.")
         if event.type == "completed":
+            status = event.metadata.get("status", "completed")
+            if status != "completed":
+                raise RuntimeError(f"Nervure eval did not complete: {status}.")
+            completed = True
             final_text = event.text
+    if not completed:
+        raise RuntimeError("Nervure eval did not complete: stream ended without completion.")
     return final_text
 
 
 async def _shutdown(runtime, workspace: Path) -> None:
-    runtime.message_store.flush_transcript()
-    runtime.trace_recorder.flush()
-    runtime.error_log_recorder.flush()
-    if runtime.mcp_manager is not None:
-        await runtime.mcp_manager.close_all()
+    await runtime.close()
     log_dir = Path("/logs/agent/nervure")
     log_dir.mkdir(parents=True, exist_ok=True)
     trace_path = runtime.trace_recorder.trace_path

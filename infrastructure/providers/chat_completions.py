@@ -71,6 +71,8 @@ class OpenAICompatibleChatCompletionsClient:
             payload,
             self.config.timeout_seconds,
         ):
+            if chunk.get("error") is not None:
+                raise self._invalid_response("Provider returned an error inside its stream.")
             chunk_usage = _parse_usage(chunk.get("usage"))
             if chunk_usage is not None:
                 usage = chunk_usage
@@ -117,14 +119,21 @@ class OpenAICompatibleChatCompletionsClient:
                         }
                     )
 
-        tool_calls = self._completed_tool_calls(tool_accumulators)
+        if stop_reason is None:
+            raise self._invalid_response("Provider stream ended before a finish reason.")
+        output_interrupted = _is_output_interrupted_stop_reason(stop_reason)
+        # Truncated JSON cannot be parsed or executed. Let the loop's existing
+        # output-budget recovery retry the request without dangling tool calls.
+        tool_calls = () if output_interrupted else self._completed_tool_calls(tool_accumulators)
         for tool_call in tool_calls:
             if tool_call.id in emitted_completed_tool_ids:
                 continue
             emitted_completed_tool_ids.add(tool_call.id)
             yield ModelStreamEvent.tool_call_completed(tool_call)
         final_text = "".join(final_text_parts)
-        assistant_message = _assistant_message_from_stream(final_text, tool_accumulators)
+        assistant_message = _assistant_message_from_stream(
+            final_text, {} if output_interrupted else tool_accumulators
+        )
         yield ModelStreamEvent.message_completed(
             assistant_message=assistant_message,
             final_text=final_text,
@@ -132,7 +141,7 @@ class OpenAICompatibleChatCompletionsClient:
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             usage=usage,
-            output_interrupted=_is_output_interrupted_stop_reason(stop_reason),
+            output_interrupted=output_interrupted,
         )
 
     def _build_payload(self, snapshot: ContextSnapshot) -> dict[str, Any]:
@@ -161,12 +170,12 @@ class OpenAICompatibleChatCompletionsClient:
         return payload
 
     def _headers(self) -> dict[str, str]:
-        if not self.config.api_key:
+        if not self.config.api_key and self.config.provider.api_key_required:
             raise self._configuration_error("An API key must be configured before calling the provider.")
-        return {
-            **self.config.headers,
-            "Authorization": f"Bearer {self.config.api_key}",
-        }
+        headers = dict(self.config.headers)
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        return headers
 
     def _completed_tool_calls(
         self,

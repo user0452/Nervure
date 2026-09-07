@@ -222,3 +222,43 @@ def test_chat_completions_stream_rethrows_provider_errors() -> None:
         asyncio.run(run())
 
     assert exc_info.value.error_type == "invalid_response"
+
+
+@pytest.mark.parametrize("chunks", [
+    [],
+    [{"choices": [{"delta": {"content": "partial"}}]}],
+    [{"error": {"message": "synthetic upstream failure"}}],
+])
+def test_incomplete_or_error_stream_does_not_report_success(chunks):
+    client = OpenAICompatibleChatCompletionsClient(
+        resolved_config(), async_transport=FakeAsyncTransport(chunks),
+    )
+
+    async def run():
+        return [event async for event in client.stream(ContextSnapshot("", ()))]
+
+    with pytest.raises(ProviderError):
+        asyncio.run(run())
+
+
+def test_length_truncated_tool_json_still_reaches_output_recovery():
+    client = OpenAICompatibleChatCompletionsClient(
+        resolved_config(),
+        async_transport=FakeAsyncTransport([{
+            "choices": [{
+                "delta": {"tool_calls": [{
+                    "index": 0, "id": "partial",
+                    "function": {"name": "read_file", "arguments": '{"path":'},
+                }]},
+                "finish_reason": "length",
+            }],
+        }]),
+    )
+
+    async def run():
+        return [event async for event in client.stream(ContextSnapshot("", ()))]
+
+    events = asyncio.run(run())
+    assert events[-1].output_interrupted is True
+    assert events[-1].metadata["tool_calls"] == ()
+    assert not any(event.type == "tool_call_completed" for event in events)

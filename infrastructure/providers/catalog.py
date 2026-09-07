@@ -64,6 +64,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderDefinition] = {
         display_name="Ollama",
         base_url="http://localhost:11434",
         models_path="/api/tags",
+        chat_completions_path="/v1/chat/completions",
         api_key_required=False,
         notes="Local Ollama instance. API key not required.",
     ),

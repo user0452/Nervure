@@ -427,3 +427,19 @@ def test_recent_tail_keeps_latest_user_turn_and_tool_pair() -> None:
     tail = service._recent_tail(messages)
 
     assert tail == messages[2:]
+
+
+def test_recent_tail_does_not_retain_entire_oversized_user_turn():
+    service = ContextCompactionService(config=CompactionConfig(
+        recent_tail_min_tokens=0, recent_tail_max_tokens=256,
+    ))
+    messages = (
+        {"role": "user", "content": "Preserve the public API."},
+        *({"role": "assistant", "content": "already summarized " * 100} for _ in range(30)),
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "last", "name": "read_file"}]},
+        {"role": "tool_result", "tool_call_id": "last", "content": "latest result"},
+    )
+    tail = service._recent_tail(messages)
+    assert tail[0] == messages[0]
+    assert tail[-2:] == messages[-2:]
+    assert len(tail) == 3

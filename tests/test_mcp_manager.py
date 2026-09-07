@@ -360,8 +360,11 @@ class _RetryingMcpConnectionManager(McpConnectionManager):
     async def ensure_connected(self, server_name: str) -> Any:
         self.ensure_attempts += 1
         if self.ensure_attempts == 1:
-            return SimpleNamespace(session=_FailingSession())
-        return SimpleNamespace(session=_SuccessfulSession())
+            return SimpleNamespace(
+                session=_FailingSession(),
+                tools=(SimpleNamespace(tool_name="lookup.docs", annotations={"readOnlyHint": True}),),
+            )
+        return SimpleNamespace(session=_SuccessfulSession(), tools=())
 
     async def _disconnect(self, server_name: str) -> None:
         self.disconnects.append(server_name)

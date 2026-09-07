@@ -65,7 +65,7 @@ class FakeTransport:
                 for index, tool_call in enumerate(message["tool_calls"])
             ]
             finish_reason = finish_reason or "tool_calls"
-        yield {"choices": [{"delta": delta, "finish_reason": finish_reason}]}
+        yield {"choices": [{"delta": delta, "finish_reason": finish_reason or "stop"}]}
         if response.get("usage") is not None:
             yield {"usage": response["usage"]}
 

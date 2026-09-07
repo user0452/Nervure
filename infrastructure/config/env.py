@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Literal
@@ -138,7 +139,7 @@ def load_provider_config(
         base_url,
         _required_string(values, f"{prefix}_MODEL"),
         secret,
-        timeout_seconds=_optional_float(values, "NERVURE_TIMEOUT_SECONDS", default=60.0),
+        timeout_seconds=_optional_positive_float(values, "NERVURE_TIMEOUT_SECONDS", default=60.0),
         model_call_timeout_seconds=_optional_positive_float(
             values,
             "NERVURE_MODEL_CALL_TIMEOUT_SECONDS",
@@ -209,9 +210,9 @@ def _optional_positive_float(
     default: float,
 ) -> float:
     value = _optional_float(values, key, default=default)
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ProviderError(
-            f"Provider .env field {key} must be greater than zero.",
+            f"Provider .env field {key} must be finite and greater than zero.",
             error_type="configuration_error",
         )
     return value

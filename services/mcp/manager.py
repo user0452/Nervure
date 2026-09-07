@@ -156,12 +156,27 @@ class McpConnectionManager:
         tool_call_id: str,
     ) -> McpToolCallResult:
         descriptor_name = build_mcp_tool_name(server_name, tool_name).provider_name
+        call_started = False
+        retry_safe = False
         try:
             connected = await self.ensure_connected(server_name)
+            retry_safe = any(
+                tool.tool_name == tool_name
+                and (
+                    tool.annotations.get("readOnlyHint") is True
+                    or tool.annotations.get("idempotentHint") is True
+                )
+                for tool in connected.tools
+            )
+            call_started = True
             result = await connected.session.call_tool(tool_name, arguments or {})
-        except Exception:
+        except Exception as first_error:
             await self._disconnect(server_name)
             try:
+                # A lost reply does not mean a write was not applied. Only
+                # retry dispatched calls explicitly advertised as retry-safe.
+                if call_started and not retry_safe:
+                    raise first_error
                 connected = await self.ensure_connected(server_name)
                 result = await connected.session.call_tool(tool_name, arguments or {})
             except Exception as exc:
@@ -172,6 +187,7 @@ class McpConnectionManager:
                         "tool": tool_name,
                         "tool_call_id": tool_call_id,
                         "stage": "call_tool",
+                        "retry_suppressed": call_started and not retry_safe,
                     },
                 )
                 self._record_tool_call(
@@ -190,6 +206,8 @@ class McpConnectionManager:
                         "error_type": type(exc).__name__,
                         "server": server_name,
                         "tool": tool_name,
+                        "execution_outcome": "unknown",
+                        "retry_suppressed": call_started and not retry_safe,
                     },
                 )
         content, metadata, is_error = render_mcp_tool_result(result)

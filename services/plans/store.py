@@ -44,10 +44,12 @@ class PlanFile:
 
     def write(self, content: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # ``write_text`` is atomic on POSIX for files that do not exist; on
-        # Windows we explicitly flush + replace to avoid leaving a half-written
-        # plan when the process dies mid-write.
-        self.path.write_text(content, encoding="utf-8")
+        temporary = self.path.with_name(f".{self.path.name}.{secrets.token_hex(8)}.tmp")
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            temporary.replace(self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 class PlanStore:

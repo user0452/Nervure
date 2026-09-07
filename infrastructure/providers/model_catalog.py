@@ -30,20 +30,22 @@ class ModelCatalogClient:
         self.transport = transport or UrllibHttpTransport(provider_id=config.provider_id)
 
     def list_models(self) -> tuple[ProviderModel, ...]:
-        if not self.config.api_key:
+        if not self.config.api_key and self.config.provider.api_key_required:
             raise ProviderError(
                 "An API key must be configured before listing provider models.",
                 provider_id=self.config.provider_id,
                 error_type="configuration_error",
             )
+        headers = dict(self.config.headers)
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
         response = self.transport.get_json(
             _join_url(self.config.base_url, self.config.models_path),
-            {
-                **self.config.headers,
-                "Authorization": f"Bearer {self.config.api_key}",
-            },
+            headers,
             self.config.timeout_seconds,
         )
+        if self.config.models_path == "/api/tags":
+            return _parse_ollama_models(response)
         return _parse_models(response, provider_id=self.config.provider_id)
 
 
@@ -223,10 +225,6 @@ def test_model_connection(
 
     # Determine chat completions endpoint.
     chat_path = provider.chat_completions_path or "/chat/completions"
-    # For Ollama, the chat endpoint is /api/chat.
-    if provider.models_path == "/api/tags":
-        chat_path = "/api/chat"
-
     url = _join_url(effective_base_url, chat_path)
     payload = {
         "model": model,

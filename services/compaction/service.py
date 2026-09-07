@@ -462,13 +462,15 @@ class ContextCompactionService:
             messages,
             start_index,
         )
-        # Keep the user message that started the newest turn whenever the
-        # token budget cuts into an assistant/tool exchange.  This may add a
-        # small amount beyond the nominal tail budget, but avoids leaving the
-        # model with an orphaned tool exchange or no task anchor.
-        while adjusted > 0 and messages[adjusted].get("role") != "user":
-            adjusted -= 1
-        return tuple(deepcopy(message) for message in messages[adjusted:])
+        tail = tuple(deepcopy(message) for message in messages[adjusted:])
+        # Keep the task anchor, not every already-summarized step between it
+        # and the tail. Rewinding the whole turn can undo compaction entirely.
+        anchor_index = adjusted
+        while anchor_index > 0 and messages[anchor_index].get("role") != "user":
+            anchor_index -= 1
+        if anchor_index < adjusted and messages[anchor_index].get("role") == "user":
+            return (deepcopy(messages[anchor_index]),) + tail
+        return tail
 
     def _replace_active_messages(
         self,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import json
 from pathlib import Path
+import re
 import threading
 from typing import Any, Iterable
 import uuid
@@ -44,10 +45,10 @@ class TaskStore:
         self._lock = threading.RLock()
 
     def tasks_dir(self, task_list_id: str) -> Path:
-        return self.root / task_list_id
+        return _child_path(self.root, task_list_id)
 
     def task_path(self, task_list_id: str, task_id: str) -> Path:
-        return self.tasks_dir(task_list_id) / f"{task_id}.json"
+        return _child_path(self.tasks_dir(task_list_id), task_id, suffix=".json")
 
     def create_task(
         self,
@@ -81,7 +82,7 @@ class TaskStore:
         if not directory.exists():
             return ()
         tasks = [
-            self._read_task_path(path)
+            self._read_task_path(self.task_path(task_list_id, path.stem))
             for path in directory.glob("*.json")
             if not path.name.startswith(".") and not path.name.endswith(".tmp")
         ]
@@ -279,6 +280,20 @@ class TaskStore:
             if tasks.get(blocker_id) is not None
             and tasks[blocker_id].status != "completed"
         )
+
+
+def _child_path(parent: Path, identifier: str, *, suffix: str = "") -> Path:
+    # IDs are opaque names, never filesystem paths (including Windows ADS).
+    if (
+        not isinstance(identifier, str)
+        or re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", identifier) is None
+        or identifier.endswith(".")
+    ):
+        raise TaskStoreError("Task identifiers must be safe path components.")
+    path = parent / f"{identifier}{suffix}"
+    if path.resolve().parent != parent.resolve():
+        raise TaskStoreError("Task path resolves outside its owning directory.")
+    return path
 
 
 def _merge_metadata(
