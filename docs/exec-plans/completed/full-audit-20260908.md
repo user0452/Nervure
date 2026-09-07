@@ -22,7 +22,7 @@ distinguish tested behavior from design claims and proposed internship work.
 - [x] (2026-09-07 UTC) Run final suite: 895 passed in 21.15s; compileall, dataset validation and diff whitespace checks passed.
 - [x] (2026-09-07 UTC) Complete staged path/configured-secret checks and commit tested runtime changes as bc43c1b7724efebcd6c9d6c77c28b8ef0a213321.
 - [x] (2026-09-07 UTC) Complete Chinese report with 24 module topics and official source snapshots; verify all 93 local references and sanitized evidence against all six raw live summaries.
-- [ ] Push main and verify remote HEAD.
+- [x] (2026-09-07 UTC) Push main and verify GitHub HEAD equals local 0c3e8f380cc0c70e0dd8f68d67c9a58fec0693d0; working tree clean and repository still private. Archive this completed plan.
 
 ## Surprises & Discoveries
 
@@ -90,7 +90,9 @@ distinct scenarios have successful records, but the 14 case attempts include
 seven failures and span evolving working trees. This is not a benchmark score
 or a final-revision all-pass live run. Sanitized aggregates are stored in
 `docs/evidence/live-module-audit-20260907.json`; private raw outputs remain
-ignored. Publication verification is the only remaining step.
+ignored. Runtime and evidence publication was verified at
+0c3e8f380cc0c70e0dd8f68d67c9a58fec0693d0; the subsequent plan archival
+commit changes documentation only.
 
 ## Context and Orientation
 
@@ -177,4 +179,6 @@ and distinguish upstream code from later contributions in the report.
 Revision note: updated after final offline validation, code commit and evidence
 cross-checks. The large single-turn compaction fixture exposed a production
 bug, not merely a benchmark assertion issue. Report and sanitized JSON are
-complete; push and remote verification remain pending.
+complete and published, with remote HEAD verified. This final revision archives
+the plan after completion; original files, credentials and private raw outputs
+remain untouched.
