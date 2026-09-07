@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "audit_date_utc": "2026-09-07",
+  "artifact_date_local": "2026-09-08",
+  "local_timezone": "Asia/Shanghai",
+  "scope": "Synthetic live module smoke tests, not a coding benchmark",
+  "final_offline_tested_revision": "bc43c1b7724efebcd6c9d6c77c28b8ef0a213321",
+  "live_revision_scope": "Runs were performed on evolving audit working trees; they are not one all-pass run at the final revision.",
+  "configuration": {
+    "provider_id": "custom",
+    "configured_model": "mimo-v2.5-pro-1m",
+    "authenticated_discovery_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+    "test_only_model_override": "mimo-v2.5-pro",
+    "env_file_modified": false,
+    "configured_model_probe_errors": 2,
+    "configured_model_probe_error_type": "server_error"
+  },
+  "offline": {
+    "baseline_passed": 845,
+    "final_passed": 895,
+    "final_duration_seconds": 21.15,
+    "compileall_passed": true,
+    "dataset_validation_passed": true,
+    "diff_check_passed": true,
+    "coverage_percentage_measured": false
+  },
+  "budget": {
+    "authorized_ceiling_tokens": 1000000,
+    "cumulative_reserved_tokens": 635474,
+    "remaining_reservation_allowance": 364526,
+    "model_calls": 24,
+    "calls_with_usage": 22,
+    "calls_without_usage": 2,
+    "reported_input_tokens": 65526,
+    "reported_output_tokens": 5294,
+    "reported_input_plus_output_tokens": 70820,
+    "reported_cache_read_input_tokens": 34240,
+    "cache_reads_already_included_in_input": true,
+    "exact_billable_total_known": false,
+    "reservation_method": "Before I/O reserve UTF-8 JSON payload bytes + requested output cap + 8192 framing tokens. Retain reservations after failures; charge any reported excess. Subtract every previous run's reservations before rerunning.",
+    "limitations": "A conservative estimate, not a tokenizer or hidden-provider-usage guarantee. Missing usage is unknown, not zero. This ledger is confined to the opt-in evaluation harness.",
+    "per_run_max_calls": 30,
+    "per_call_max_output_tokens": 4096
+  },
+  "isolation": {
+    "synthetic_data_only": true,
+    "temporary_workspace": true,
+    "empty_test_home": true,
+    "model_exposed_tools": ["read_file", "edit_file", "write_file"],
+    "model_shell_execution": false,
+    "model_generated_python_execution": false,
+    "mcp_trust_mode": "skip",
+    "os_sandbox_claimed": false,
+    "raw_output_directories_committed": false
+  },
+  "attempts": {
+    "total_case_attempts": 14,
+    "passed_case_attempts": 7,
+    "failed_case_attempts": 7,
+    "distinct_cases_with_final_pass_evidence": 7,
+    "single_final_revision_full_suite_pass_claimed": false
+  },
+  "runs": [
+    {
+      "id": "live-audit-20260908",
+      "model": "mimo-v2.5-pro-1m",
+      "calls": 1,
+      "reserved_tokens": 12507,
+      "reported_input_tokens": null,
+      "reported_output_tokens": null,
+      "reported_total_tokens": null,
+      "reported_cache_read_input_tokens": null,
+      "calls_without_usage": 1,
+      "cases": [
+        {"name": "stream", "status": "fail", "reason": "provider_server_error"}
+      ]
+    },
+    {
+      "id": "live-audit-20260908-retry",
+      "model": "mimo-v2.5-pro-1m",
+      "calls": 1,
+      "reserved_tokens": 12507,
+      "reported_input_tokens": null,
+      "reported_output_tokens": null,
+      "reported_total_tokens": null,
+      "reported_cache_read_input_tokens": null,
+      "calls_without_usage": 1,
+      "cases": [
+        {"name": "stream", "status": "fail", "reason": "provider_server_error"}
+      ]
+    },
+    {
+      "id": "live-audit-20260908-pro",
+      "model": "mimo-v2.5-pro",
+      "calls": 1,
+      "reserved_tokens": 12504,
+      "reported_input_tokens": 21,
+      "reported_output_tokens": 59,
+      "reported_total_tokens": 80,
+      "reported_cache_read_input_tokens": 0,
+      "calls_without_usage": 0,
+      "cases": [
+        {"name": "stream", "status": "fail", "reason": "exact_echo_assertion_failed"}
+      ]
+    },
+    {
+      "id": "live-audit-20260908-pro-full",
+      "model": "mimo-v2.5-pro",
+      "calls": 16,
+      "reserved_tokens": 287500,
+      "reported_input_tokens": 24801,
+      "reported_output_tokens": 3255,
+      "reported_total_tokens": 28056,
+      "reported_cache_read_input_tokens": 9920,
+      "calls_without_usage": 0,
+      "cases": [
+        {"name": "stream", "status": "fail", "reason": "exact_echo_assertion_failed"},
+        {"name": "tool_roundtrip", "status": "fail", "reason": "harness_awaited_async_iterator"},
+        {"name": "memory_selector", "status": "pass", "evidence": {"selected_paths": ["testing.md"]}},
+        {"name": "full_compaction", "status": "fail", "reason": "fixture_smaller_than_retained_tail_budget"},
+        {"name": "explore_subagent", "status": "pass", "evidence": {"tool_results": 1, "fixture_unchanged": true}},
+        {"name": "memory_extraction", "status": "pass", "evidence": {"durable_rule_written": true, "watermark_advanced": true}},
+        {"name": "runtime_file_edit_and_close", "status": "pass", "evidence": {"settings_verified": true, "session_closed": true}}
+      ]
+    },
+    {
+      "id": "live-audit-20260908-corrected",
+      "model": "mimo-v2.5-pro",
+      "calls": 4,
+      "reserved_tokens": 174594,
+      "reported_input_tokens": 20741,
+      "reported_output_tokens": 663,
+      "reported_total_tokens": 21404,
+      "reported_cache_read_input_tokens": 4416,
+      "calls_without_usage": 0,
+      "cases": [
+        {"name": "stream", "status": "pass", "evidence": {"exact_output": true}},
+        {"name": "tool_roundtrip", "status": "pass", "evidence": {"tool_calls": 1, "result_roundtrip": true}},
+        {"name": "full_compaction", "status": "fail", "reason": "production_recent_tail_reincluded_summarized_middle", "evidence": {"estimated_before": 40628, "estimated_after": 41325}}
+      ]
+    },
+    {
+      "id": "live-audit-20260908-compact-fixed",
+      "model": "mimo-v2.5-pro",
+      "calls": 1,
+      "reserved_tokens": 135862,
+      "reported_input_tokens": 19963,
+      "reported_output_tokens": 1317,
+      "reported_total_tokens": 21280,
+      "reported_cache_read_input_tokens": 19904,
+      "calls_without_usage": 0,
+      "cases": [
+        {"name": "full_compaction", "status": "pass", "evidence": {"estimated_before": 40628, "estimated_after": 10755}}
+      ]
+    }
+  ],
+  "failure_interpretation": {
+    "exact_echo": "The early user message contained only the marker; the strict echo instruction was in the system message. The final fixture used an explicit user request. This does not establish general instruction-following quality.",
+    "tool_roundtrip": "The harness was corrected to consume RegistryToolExecutor.execute as an async iterator. This was not a production runtime defect.",
+    "compaction_fixture": "The initial short fixture could legitimately be fully retained by the recent-tail budget. A longer fixture exposed a separate, real production compaction bug.",
+    "compaction_result": "The final check verifies retention of synthetic target/API constraints and a lower heuristic context estimate. It is not a production success-rate or billed-token reduction claim."
+  },
+  "not_exercised_live": [
+    "Ollama server",
+    "External MCP service",
+    "Unrestricted shell agent",
+    "Harbor Docker task benchmark",
+    "SWE-bench",
+    "Multi-provider reliability matrix",
+    "Restart and process-tree isolation",
+    "Long-term memory conflict and poisoning evaluation"
+  ],
+  "privacy": {
+    "api_key_included": false,
+    "provider_base_url_included": false,
+    "raw_conversations_included": false,
+    "personal_session_data_included": false,
+    "temporary_absolute_paths_included": false
+  }
+}
