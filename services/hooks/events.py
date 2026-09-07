@@ -22,3 +22,5 @@ class HookEvent(StrEnum):
     PRE_COMPACT = "PreCompact"
     POST_COMPACT = "PostCompact"
     COMPACT_FAILED = "CompactFailed"
+    SESSION_CLOSE = "SessionClose"
+    SESSION_SWITCH = "SessionSwitch"

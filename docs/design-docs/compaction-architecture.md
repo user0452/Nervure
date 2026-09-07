@@ -33,8 +33,10 @@ def bind_runtime(*, message_store=None, result_store=None, model_client=None, cu
 | `compact_trigger_ratio` / `compact_summary_reserve_ratio` / `compact_safety_buffer_ratio` | 0.80 / 0.10 / 0.05 |
 | `compact_recent_tail_ratio` | 0.08 |
 | `recent_tail_min_tokens` / `recent_tail_max_tokens` | 4_000 / 32_000 |
-| `tool_result_budget_chars` | 200_000 |
+| `tool_result_hard_cap_tokens` | 16_000（单条 tool result 独立硬顶）|
+| `tool_result_remaining_ratio` | 0.25 |
 | `tool_result_preview_chars` | 4_000 |
+| `tool_result_budget_chars`（legacy 字符兜底，正常决策不再依赖）| 200_000 |
 | `microcompact_keep_recent` | 5 |
 | `snip_max_messages` | 80 |
 | `max_consecutive_auto_compact_failures` | 3 |
@@ -51,7 +53,7 @@ def bind_runtime(*, message_store=None, result_store=None, model_client=None, cu
 ```mermaid
 flowchart TD
   Prep["prepare(messages, state)"] --> Cheap["prepare_for_model: cheap pipeline"]
-  Cheap --> Budget["1. tool result budget (>200K → ToolResultStorage + 引用)"]
+  Cheap --> Budget["1. tool result budget: 动态 token 预算 → ToolResultStorage + 引用"]
   Budget --> Snip["2. snip: ContextProjector(max_messages=80)"]
   Snip --> Micro["3. microcompact: 旧 tool result → 占位符"]
   Micro --> Est["token 估算 → state.metadata['last_compaction']"]
@@ -66,7 +68,15 @@ flowchart TD
 
 ### Cheap pipeline（投影，不改写 store）
 
-`prepare_for_model` 顺序：tool result 预算（超 200K 字符的结果写共享 `ToolResultStorage`，模型只见引用+preview）→ snip（`ContextProjector` 滑窗，最多 80 条）→ microcompact（旧的非 stored tool result content 替换为占位符）→ token 估算。这一阶段只投影，不调用 `replace_messages_for_compaction`。
+`prepare_for_model` 顺序：tool result 动态预算 → snip（`ContextProjector` 滑窗，最多 80 条）→ microcompact（旧的非 stored tool result content 替换为占位符）→ token 估算。这一阶段只投影，不调用 `replace_messages_for_compaction`。
+
+Tool result 动态预算是**单条结果的局部保护**，与全局 Final Context Budget / Full Compact 职责分离。对每条 `tool_result` 按消息顺序做 sequential projection：维护已决策前缀的投影 token 累计 `prefix_projected_tokens`，并加上 `CurrentModelContext` 中上一次请求快照的固定前缀（system prompt、tool schemas、hints；其旧消息刻意不计，避免与当前消息链重复计算），得到 `context_tokens_without_result`；随后
+
+- `remaining_tokens = auto_compact_threshold_tokens - context_tokens_without_result`（不小于 0）；
+- `dynamic_budget_tokens = min(tool_result_hard_cap_tokens, int(remaining_tokens * tool_result_remaining_ratio))`；
+- 当结果估算 token 大于动态预算时，完整结果写入共享 `ToolResultStorage`，模型只见 ref + preview；否则原样内联。
+
+候选结果自身的体积不计入自己的 baseline；已内联的大结果继续占用后续结果的预算，已外置结果只按 ref+preview 的实际投影体积入账，因此多条连续大结果不可能各自重复吃掉 25% 的原始剩余空间。context 越满，允许内联的结果越小；预算同时随 `context_window_tokens` 缩放。`tool_result_budget_chars` 仅作为显式配置的 legacy 字符兜底（默认配置下 token 规则总是先生效）。`compact_result_budget` trace 事件为每条候选记录 `result_estimated_tokens` / `dynamic_budget_tokens` / `context_tokens_without_result` / `remaining_tokens` / `hard_cap_tokens` / `externalized`，不记录结果内容。
 
 ### Destructive compact（改写活动链）
 
@@ -88,7 +98,7 @@ Full Compact 的 prompt-cache 验收还要求保留父模型请求的 immutable 
 
 ### ToolResultStorage
 
-路径 `<session_dir>/tool-results/<result_id>.txt`，`persist_tool_result(...) -> StoredToolResultRef`，`format_model_reference(ref, preview)` 生成模型可见引用。该实现位于 `utils/toolResultStorage`，同时服务 transcript 外置、compaction 层 200K 字符预算和 executor `ToolResultPolicy` 预算；compaction 只消费 ref 和模型引用文本，不拥有通用存储实现。
+路径 `<session_dir>/tool-results/<result_id>.txt`，`persist_tool_result(...) -> StoredToolResultRef`，`format_model_reference(ref, preview)` 生成模型可见引用。该实现位于 `utils/toolResultStorage`，同时服务 transcript 外置、compaction 层动态 token 预算（legacy 字符兜底）和 executor `ToolResultPolicy` 预算；compaction 只消费 ref 和模型引用文本，不拥有通用存储实现。
 
 ### PreCompact hook
 

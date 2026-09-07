@@ -26,6 +26,7 @@ from services.permissions import (
     PermissionUpdateType,
     permission_rule_value_from_string,
 )
+from services.hooks import HookEvent
 from ui.cli import renderer
 from ui.cli.resume import list_session_summaries
 from ui.cli.resume import resolve_resume_target as _resolve_resume_target
@@ -517,6 +518,7 @@ def _tasks(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
 def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
     old_session_id = runtime.state.session_id
+    _fire_session_hook(runtime, HookEvent.SESSION_SWITCH)
     runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     new_session_id = runtime.state.start_new_session()
@@ -539,6 +541,7 @@ def _resume(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult
     if len(invocation.args) != 1:
         return CommandResult(renderable=renderer.render_error("Usage: /resume [target]"))
 
+    _fire_session_hook(runtime, HookEvent.SESSION_SWITCH)
     try:
         target = _resolve_resume_argument(runtime, invocation.args[0])
         resumed = restore_runtime_from_target(runtime, target)
@@ -573,6 +576,7 @@ def _connect(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResul
 
 def _exit(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
+    _fire_session_hook(runtime, HookEvent.SESSION_CLOSE)
     runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     runtime.trace_recorder.flush()
@@ -639,6 +643,24 @@ def _looks_like_path_target(target: str) -> bool:
         or "/" in target
         or "\\" in target
         or ":" in target
+    )
+
+
+def _fire_session_hook(runtime: CliRuntime, event: HookEvent) -> None:
+    """Fire a session lifecycle hook (SESSION_CLOSE / SESSION_SWITCH) synchronously.
+
+    Used to trigger final LTM consolidation before the session is left.
+    """
+    if runtime.hooks is None:
+        return
+    _run_async_blocking(
+        runtime.hooks.run(
+            event,
+            {
+                "state": runtime.state,
+                "session_id": runtime.state.session_id,
+            },
+        )
     )
 
 

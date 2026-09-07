@@ -23,8 +23,15 @@ class CompactionConfig:
     compact_recent_tail_ratio: float = 0.08
     recent_tail_min_tokens: int = 4_000
     recent_tail_max_tokens: int = 32_000
-    tool_result_budget_chars: int = 200_000
+    # Token-aware local protection for a single tool result. Each result's
+    # inline budget is min(hard_cap, remaining * ratio), where remaining
+    # shrinks as current context occupancy grows.
+    tool_result_hard_cap_tokens: int = 16_000
+    tool_result_remaining_ratio: float = 0.25
     tool_result_preview_chars: int = 4_000
+    # Legacy fixed character threshold, retained as a backstop for explicit
+    # callers. Normal externalization decisions are token-driven.
+    tool_result_budget_chars: int = 200_000
     microcompact_keep_recent: int = 5
     snip_max_messages: int = 80
     max_consecutive_auto_compact_failures: int = 3
@@ -39,6 +46,16 @@ class CompactionConfig:
             raise ValueError(
                 "recent_tail_max_tokens must be >= recent_tail_min_tokens"
             )
+        if self.tool_result_hard_cap_tokens <= 0:
+            raise ValueError("tool_result_hard_cap_tokens must be positive")
+        if not 0 < self.tool_result_remaining_ratio <= 1:
+            raise ValueError(
+                "tool_result_remaining_ratio must be between 0 and 1"
+            )
+        if self.tool_result_preview_chars < 0:
+            raise ValueError("tool_result_preview_chars must be non-negative")
+        if self.tool_result_budget_chars <= 0:
+            raise ValueError("tool_result_budget_chars must be positive")
         ratios = {
             "compact_trigger_ratio": self.compact_trigger_ratio,
             "compact_summary_reserve_ratio": self.compact_summary_reserve_ratio,
@@ -80,6 +97,28 @@ class CompactionConfig:
         """Compatibility name for the ratio-derived compact trigger."""
 
         return self.compact_trigger_tokens
+
+    def tool_result_dynamic_budget(
+        self,
+        context_tokens_without_result: int,
+    ) -> tuple[int, int]:
+        """Return ``(remaining_tokens, budget_tokens)`` for one tool result.
+
+        ``context_tokens_without_result`` is the projected model-visible
+        occupancy of everything except the candidate result: the fixed
+        request prefix plus the already-projected earlier messages. The
+        per-result budget never exceeds ``tool_result_hard_cap_tokens`` and
+        shrinks to zero as occupancy approaches the auto-compact threshold.
+        """
+
+        remaining = max(
+            0,
+            self.auto_compact_threshold_tokens
+            - max(0, int(context_tokens_without_result)),
+        )
+        budget = int(remaining * self.tool_result_remaining_ratio)
+        budget = min(self.tool_result_hard_cap_tokens, budget)
+        return remaining, max(0, budget)
 
 
 @dataclass(frozen=True)

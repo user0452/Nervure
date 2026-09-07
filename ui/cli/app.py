@@ -437,16 +437,58 @@ def build_runtime(
         long_term_memory_store,
         subagent_runner=subagent_runner,
         trace_recorder=trace_recorder,
+        message_store=message_store,
+        background_task_manager=background_task_manager,
     )
     long_term_memory_extractor_ref = {"extractor": long_term_memory_extractor}
-    hooks.register(
-        HookEvent.TURN_STOPPED,
-        lambda payload: _start_long_term_memory_dream(
-            payload,
-            long_term_memory_extractor=long_term_memory_extractor_ref["extractor"],
-            background_task_manager=background_task_manager,
-        ),
-    )
+
+    async def _on_turn_stopped(payload: dict[str, object]) -> None:
+        extractor = long_term_memory_extractor_ref["extractor"]
+        state = payload.get("state")
+        if isinstance(state, RuntimeState):
+            extractor.mark_dirty(
+                state,
+                messages=tuple(payload.get("messages", ())),
+                tool_calls=tuple(payload.get("tool_calls", ())),
+            )
+
+    hooks.register(HookEvent.TURN_STOPPED, _on_turn_stopped)
+
+    async def _on_pre_compact(payload: dict[str, object]) -> None:
+        extractor = long_term_memory_extractor_ref["extractor"]
+        state = payload.get("state")
+        if not isinstance(state, RuntimeState):
+            return
+        messages = payload.get("messages")
+        if not isinstance(messages, (tuple, list)):
+            messages = None
+        # Non-blocking: the payload already carries a deepcopy of pre-compact
+        # messages, so consolidation can run async while compact rewrites the store.
+        asyncio.create_task(
+            extractor.consolidate(
+                trigger="full_compact",
+                state=state,
+                messages=tuple(messages) if messages is not None else None,
+            )
+        )
+
+    hooks.register(HookEvent.PRE_COMPACT, _on_pre_compact)
+
+    async def _on_session_close(payload: dict[str, object]) -> None:
+        extractor = long_term_memory_extractor_ref["extractor"]
+        state = payload.get("state")
+        if isinstance(state, RuntimeState):
+            await extractor.flush(trigger="session_close", state=state)
+
+    hooks.register(HookEvent.SESSION_CLOSE, _on_session_close)
+
+    async def _on_session_switch(payload: dict[str, object]) -> None:
+        extractor = long_term_memory_extractor_ref["extractor"]
+        state = payload.get("state")
+        if isinstance(state, RuntimeState):
+            await extractor.flush(trigger="session_switch", state=state)
+
+    hooks.register(HookEvent.SESSION_SWITCH, _on_session_switch)
     compaction_service.bind_runtime(
         model_client=model_client,
         current_model_context=current_model_context,

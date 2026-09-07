@@ -11,6 +11,7 @@ from typing import Any
 
 from core.runtime_state import RuntimeState
 from services.compaction.token_estimator import (
+    estimate_message_tokens,
     estimate_messages_tokens,
     estimate_snapshot_tokens,
 )
@@ -508,6 +509,12 @@ class ContextCompactionService:
                 "session_id": state.session_id,
                 "turn_count": state.turn_count,
                 "focus": focus,
+                "state": state,
+                "messages": (
+                    self._message_store.current_messages()
+                    if self._message_store is not None
+                    else ()
+                ),
             },
         )
         return dict(result.metadata)
@@ -570,23 +577,98 @@ class ContextCompactionService:
             },
         )
 
+    def _fixed_prefix_tokens(self) -> int:
+        """Estimated tokens of the non-message request prefix.
+
+        The previous model request snapshot (held by ``CurrentModelContext``)
+        is the best available proxy for the system prompt, tool schemas and
+        fixed hints assembled for the upcoming request. Its messages are
+        deliberately excluded: the live ``messages`` chain passed to
+        ``prepare_for_model`` already supersedes them and must not be counted
+        twice.
+        """
+
+        if self._current_model_context is None:
+            return 0
+        snapshot = self._current_model_context.snapshot_copy()
+        if snapshot is None:
+            return 0
+        return estimate_snapshot_tokens(replace(snapshot, messages=()))
+
     def _apply_tool_result_budget(
         self,
         messages: tuple[dict[str, Any], ...],
     ) -> tuple[dict[str, Any], ...]:
+        """Externalize oversized tool results using a dynamic token budget.
+
+        Sequential projection: messages are walked in order while a running
+        projected-token total of the already-decided prefix is maintained.
+        The baseline for every candidate is ``fixed prefix + projected
+        prefix`` so that (a) the candidate's own bulk never inflates its own
+        budget and (b) several large results cannot each claim the full
+        original remaining headroom, because an inlined result stays in the
+        running total while an externalized one contributes only its compact
+        reference footprint. Tool results are appended at the tail of the live
+        chain; older results left behind are handled by microcompact next.
+        """
+
+        fixed_prefix_tokens = self._fixed_prefix_tokens()
+
         projected: list[dict[str, Any]] = []
+        decisions: list[dict[str, Any]] = []
         stored_count = 0
+        prefix_projected_tokens = 0
+
         for message in messages:
             next_message = deepcopy(message)
-            if next_message.get("role") != "tool_result":
-                projected.append(next_message)
-                continue
             content = next_message.get("content")
-            if not isinstance(content, str):
+            is_result_candidate = (
+                next_message.get("role") == "tool_result"
+                and isinstance(content, str)
+            )
+            if not is_result_candidate:
                 projected.append(next_message)
+                prefix_projected_tokens += estimate_message_tokens(
+                    next_message
+                )
                 continue
-            if len(content) <= self.config.tool_result_budget_chars:
+
+            result_tokens = estimate_message_tokens(next_message)
+            context_without_result = (
+                fixed_prefix_tokens + prefix_projected_tokens
+            )
+            remaining_tokens, dynamic_budget = (
+                self.config.tool_result_dynamic_budget(context_without_result)
+            )
+            exceeds_token_budget = result_tokens > dynamic_budget
+            # Legacy fixed-char backstop for explicit callers; with defaults
+            # the token rule always binds first.
+            exceeds_legacy_chars = (
+                len(content) > self.config.tool_result_budget_chars
+            )
+            externalized = exceeds_token_budget or exceeds_legacy_chars
+            reasons: list[str] = []
+            if exceeds_token_budget:
+                reasons.append("token_budget")
+            if exceeds_legacy_chars:
+                reasons.append("legacy_char_budget")
+            decisions.append(
+                {
+                    "call_id": str(next_message.get("tool_call_id", "")),
+                    "tool_name": str(next_message.get("tool_name", "")),
+                    "result_estimated_tokens": result_tokens,
+                    "dynamic_budget_tokens": dynamic_budget,
+                    "context_tokens_without_result": context_without_result,
+                    "remaining_tokens": remaining_tokens,
+                    "hard_cap_tokens": self.config.tool_result_hard_cap_tokens,
+                    "externalized": externalized,
+                    "externalized_reason": ",".join(reasons) if reasons else "inline",
+                }
+            )
+
+            if not externalized:
                 projected.append(next_message)
+                prefix_projected_tokens += result_tokens
                 continue
 
             preview = content[: self.config.tool_result_preview_chars]
@@ -596,6 +678,14 @@ class ContextCompactionService:
                     "result_truncated": True,
                     "original_size_chars": len(content),
                     "max_result_size_chars": self.config.tool_result_budget_chars,
+                    "result_estimated_tokens": result_tokens,
+                    "dynamic_budget_tokens": dynamic_budget,
+                    "context_tokens_without_result": context_without_result,
+                    "remaining_tokens": remaining_tokens,
+                    "tool_result_hard_cap_tokens": (
+                        self.config.tool_result_hard_cap_tokens
+                    ),
+                    "externalized_reason": ",".join(reasons),
                 }
             )
             if self._result_store is not None:
@@ -619,10 +709,19 @@ class ContextCompactionService:
                 next_message["content"] = preview
             next_message["metadata"] = metadata
             projected.append(next_message)
+            # Continue the running total with the actual projected footprint
+            # (reference + preview), never with the externalized bulk.
+            prefix_projected_tokens += estimate_message_tokens(next_message)
 
         self._trace_recorder.event(
             "compact_result_budget",
-            {"stored_result_count": stored_count, "message_count": len(messages)},
+            {
+                "candidate_count": len(decisions),
+                "stored_result_count": stored_count,
+                "message_count": len(messages),
+                "fixed_prefix_tokens": fixed_prefix_tokens,
+                "results": decisions,
+            },
         )
         return tuple(projected)
 

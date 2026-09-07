@@ -6,6 +6,8 @@ __pycache__/
 .onecode/
 *.egg-info/
 .env
+.env.*
+!.env.example
 references/
 
 # Local agent/session data and evaluation run artifacts. These directories can
@@ -19,3 +21,7 @@ references/
 !.nervure/skills/
 !.nervure/skills/**
 jobs/
+
+# Local scratch files and generated output are not part of the source import.
+/work/
+/outputs/

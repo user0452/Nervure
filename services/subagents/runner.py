@@ -83,6 +83,11 @@ class SubagentRunner:
         is_fork = request.subagent_type is None
         is_compact = _is_compact_request(request)
         is_long_term_memory_extraction = _is_long_term_memory_extraction_request(request)
+        # LTM extraction must run as a clean child so it sees only the
+        # watermark-bounded message range in its prompt, not the full parent
+        # context via fork snapshot.
+        if is_long_term_memory_extraction:
+            is_fork = False
         is_background_agent = _is_background_agent_request(request)
         child_state = RuntimeState(
             max_turns=_request_max_turns(request) or definition.max_turns or 20

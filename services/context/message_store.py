@@ -243,6 +243,10 @@ class MessageStore:
         message_store._last_uuid = restored.last_uuid
         return message_store
 
+    def current_message_ids(self) -> tuple[str, ...]:
+        """Return the stable UUID of every active message, in order."""
+        return tuple(self._message_ids)
+
     def _append(self, message: dict[str, Any]) -> dict[str, Any]:
         stored = deepcopy(message)
         self._messages.append(stored)

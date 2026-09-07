@@ -273,6 +273,8 @@ class CliRuntime:
                 self.long_term_memory_store,
                 subagent_runner=subagent_runner,
                 trace_recorder=self.trace_recorder,
+                message_store=self.message_store,
+                background_task_manager=self.background_task_manager,
             )
             if self.long_term_memory_extractor_ref is not None:
                 self.long_term_memory_extractor_ref["extractor"] = (

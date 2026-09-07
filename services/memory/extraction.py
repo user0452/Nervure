@@ -1,8 +1,20 @@
-"""Blocked first-version long-term memory extraction via restricted fork child."""
+"""Deferred, event-driven long-term memory consolidation via restricted fork child.
+
+The original per-turn ``maybe_extract_after_model_response`` path is preserved
+for tests, but production wiring should use :meth:`mark_dirty` on
+``TURN_STOPPED`` and let the four triggers (idle, full_compact,
+session_close/switch, explicit) drive :meth:`consolidate`.
+
+A persistent watermark (``last_ltm_consolidated_message_id``) ensures each
+consolidation only processes messages after the previous one, and advances
+only on successful completion (including "nothing worth saving" results).
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,12 +26,22 @@ from services.subagents.types import SubagentRequest, SubagentResult
 from services.observability import TraceRecorder
 
 LONG_TERM_MEMORY_EXTRACTION_KEY = "long_term_memory_extraction"
+WATERMARK_FILENAME = "ltm_watermark.json"
+
+# Consolidation trigger identifiers (used in trace metadata).
+TRIGGER_IDLE = "idle"
+TRIGGER_FULL_COMPACT = "full_compact"
+TRIGGER_SESSION_CLOSE = "session_close"
+TRIGGER_SESSION_SWITCH = "session_switch"
+TRIGGER_EXPLICIT = "explicit"
 
 
 @dataclass(frozen=True)
 class LongTermMemoryExtractionPolicy:
     enabled: bool = True
     max_turns: int = 5
+    idle_debounce_seconds: float = 45.0
+    context_prefix_messages: int = 3
 
 
 @dataclass(frozen=True)
@@ -36,7 +58,20 @@ class LongTermMemorySubagentRunner(Protocol):
     async def run(self, request: SubagentRequest) -> SubagentResult: ...
 
 
+class MessageStoreLike(Protocol):
+    """Minimal interface the consolidation service needs from MessageStore."""
+
+    def current_messages(self) -> tuple[dict[str, Any], ...]: ...
+
+    def current_message_ids(self) -> tuple[str, ...]: ...
+
+    @property
+    def transcript_store(self) -> Any: ...
+
+
 class LongTermMemoryExtractionService:
+    """Coordinates deferred LTM consolidation with watermark + coalescing."""
+
     def __init__(
         self,
         store: LongTermMemoryStore,
@@ -44,16 +79,23 @@ class LongTermMemoryExtractionService:
         subagent_runner: LongTermMemorySubagentRunner,
         policy: LongTermMemoryExtractionPolicy | None = None,
         trace_recorder: TraceRecorder | None = None,
+        message_store: MessageStoreLike | None = None,
+        background_task_manager: Any | None = None,
     ) -> None:
         self.store = store
         self._subagent_runner = subagent_runner
         self._policy = policy or LongTermMemoryExtractionPolicy()
         self._trace_recorder = trace_recorder or TraceRecorder.noop()
+        self._message_store = message_store
+        self._background_task_manager = background_task_manager
         self._lock = asyncio.Lock()
+        self._idle_timer: Any = None  # asyncio.TimerHandle | None
+        self._pending_snapshot: tuple[tuple[dict[str, Any], ...], tuple[str, ...]] | None = None
+        self._session_id: str | None = None
 
-    @property
-    def is_running(self) -> bool:
-        return self._lock.locked()
+    # ------------------------------------------------------------------
+    # Legacy per-turn API (kept for backward-compatible tests)
+    # ------------------------------------------------------------------
 
     async def maybe_extract_after_model_response(
         self,
@@ -64,6 +106,7 @@ class LongTermMemoryExtractionService:
         tool_calls: tuple[Any, ...],
         usage: Any | None = None,
     ) -> None:
+        """Immediately extract after a model response. Legacy; tests only."""
         _ = assistant_message, usage
         job = self.prepare_extraction_job(
             messages,
@@ -80,6 +123,7 @@ class LongTermMemoryExtractionService:
         state: RuntimeState,
         *,
         tool_calls: tuple[Any, ...],
+        _check_lock: bool = True,
     ) -> LongTermMemoryExtractionJob | None:
         decision = should_extract_long_term_memory(
             messages,
@@ -91,7 +135,7 @@ class LongTermMemoryExtractionService:
             state,
             {
                 "last_decision": decision,
-                "running": self.is_running,
+                "running": self._lock.locked(),
                 "memory_dir": str(self.store.memory_dir),
             },
         )
@@ -103,7 +147,7 @@ class LongTermMemoryExtractionService:
             if decision == "main_agent_memory_write":
                 _advance_cursor(messages, state)
             return None
-        if self._lock.locked():
+        if _check_lock and self._lock.locked():
             _merge_metadata(state, {"last_status": "skipped_running", "running": True})
             return None
         return LongTermMemoryExtractionJob(
@@ -121,76 +165,475 @@ class LongTermMemoryExtractionService:
         state: RuntimeState,
     ) -> None:
         async with self._lock:
+            await self._execute_extraction(job, state)
+
+    async def _execute_extraction(
+        self,
+        job: LongTermMemoryExtractionJob,
+        state: RuntimeState,
+    ) -> None:
+        """Run the extraction child without acquiring the lock."""
+        _merge_metadata(
+            state,
+            {
+                "last_status": "running",
+                "last_started_at": _now(),
+                "running": True,
+            },
+        )
+        try:
+            self.store.ensure_exists()
+            request = SubagentRequest(
+                prompt=job.prompt,
+                subagent_type=None,
+                parent_session_id=job.parent_session_id,
+                parent_tool_call_id=job.parent_tool_call_id,
+                metadata={
+                    "purpose": "long_term_memory_extraction",
+                    "allowed_memory_dir": job.allowed_memory_dir,
+                    "max_turns": job.max_turns,
+                },
+            )
+            result = await self._subagent_runner.run(request)
+            if result.is_error:
+                raise RuntimeError(result.final_text)
+            _advance_cursor(job.messages, state)
             _merge_metadata(
                 state,
                 {
-                    "last_status": "running",
-                    "last_started_at": _now(),
-                    "running": True,
+                    "last_status": "success",
+                    "last_completed_at": _now(),
+                    "last_result_session_id": result.session_id,
+                    "running": False,
                 },
             )
+            self._trace_recorder.event(
+                "long_term_memory_extraction_completed",
+                {
+                    "status": "success",
+                    "memory_dir": self.store.memory_dir,
+                    "child_session_id": result.session_id,
+                },
+            )
+        except asyncio.CancelledError:
+            _merge_metadata(
+                state,
+                {
+                    "last_status": "killed",
+                    "last_completed_at": _now(),
+                    "running": False,
+                },
+            )
+            self._trace_recorder.event(
+                "long_term_memory_extraction_cancelled",
+                {"memory_dir": self.store.memory_dir},
+            )
+            raise
+        except Exception as exc:
+            _merge_metadata(
+                state,
+                {
+                    "last_status": "failed",
+                    "last_completed_at": _now(),
+                    "last_error_type": type(exc).__name__,
+                    "running": False,
+                },
+            )
+            self._trace_recorder.event(
+                "long_term_memory_extraction_failed",
+                {"error_type": type(exc).__name__, "memory_dir": self.store.memory_dir},
+            )
+            raise
+
+    # ------------------------------------------------------------------
+    # Deferred consolidation API
+    # ------------------------------------------------------------------
+
+    @property
+    def is_running(self) -> bool:
+        return self._lock.locked()
+
+    @property
+    def has_pending(self) -> bool:
+        return self._pending_snapshot is not None
+
+    def mark_dirty(
+        self,
+        state: RuntimeState,
+        *,
+        messages: tuple[dict[str, Any], ...] | None = None,
+        tool_calls: tuple[Any, ...] = (),
+    ) -> None:
+        """Called on ``TURN_STOPPED``.
+
+        Marks unconsolidated messages and resets the idle debounce timer.
+        If the main agent explicitly wrote memory this turn, triggers
+        immediate consolidation instead of waiting for idle.
+        """
+        _ = messages, tool_calls
+        if not self._policy.enabled:
+            return
+        if state.metadata.get("long_term_memory_extraction_agent") is True:
+            return
+        if state.metadata.get("is_fork_child") is True:
+            return
+
+        # Explicit memory write this turn -> consolidate immediately.
+        if _main_agent_wrote_memory_this_turn(state):
+            self._trace_recorder.event(
+                "ltm_consolidation_scheduled",
+                {"trigger": TRIGGER_EXPLICIT, "reason": "main_agent_memory_write"},
+            )
+            asyncio.create_task(self.consolidate(trigger=TRIGGER_EXPLICIT, state=state))
+            return
+
+        self.schedule_idle(state)
+
+    def schedule_idle(self, state: RuntimeState) -> None:
+        """Reset the idle debounce timer; fires consolidation after idle seconds."""
+        if not self._policy.enabled:
+            return
+        self._cancel_idle_timer()
+        self._session_id = state.session_id
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._idle_timer = loop.call_later(
+            self._policy.idle_debounce_seconds,
+            self._on_idle_fire,
+            state,
+        )
+        self._trace_recorder.event(
+            "ltm_consolidation_scheduled",
+            {
+                "trigger": TRIGGER_IDLE,
+                "debounce_seconds": self._policy.idle_debounce_seconds,
+            },
+        )
+
+    def _on_idle_fire(self, state: RuntimeState) -> None:
+        self._idle_timer = None
+        if state.session_id != self._session_id:
+            return  # stale timer from a previous session
+        asyncio.create_task(self.consolidate(trigger=TRIGGER_IDLE, state=state))
+
+    def _cancel_idle_timer(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    async def consolidate(
+        self,
+        *,
+        trigger: str,
+        state: RuntimeState,
+        messages: tuple[dict[str, Any], ...] | None = None,
+        message_ids: tuple[str, ...] | None = None,
+    ) -> None:
+        """Run one consolidation job; coalesces concurrent triggers.
+
+        If a consolidation is already running, the latest snapshot is stored
+        as pending and processed immediately after the current run finishes.
+        """
+        self._cancel_idle_timer()
+
+        if messages is None or message_ids is None:
+            messages, message_ids = self._snapshot(state)
+
+        # Coalesce: if already running, store latest snapshot as pending.
+        if self._lock.locked():
+            self._pending_snapshot = (messages, message_ids)
+            self._trace_recorder.event(
+                "ltm_consolidation_scheduled",
+                {
+                    "trigger": trigger,
+                    "coalesced": True,
+                    "running": True,
+                    "pending": True,
+                    "message_count": len(messages),
+                },
+            )
+            return
+
+        async with self._lock:
+            while True:
+                await self._run_one_consolidation(
+                    trigger=trigger,
+                    state=state,
+                    messages=messages,
+                    message_ids=message_ids,
+                )
+                if self._pending_snapshot is not None:
+                    messages, message_ids = self._pending_snapshot
+                    self._pending_snapshot = None
+                    trigger = TRIGGER_IDLE  # follow-up is effectively idle
+                    continue
+                break
+
+    async def flush(
+        self,
+        *,
+        trigger: str,
+        state: RuntimeState,
+    ) -> None:
+        """Wait for any running consolidation, then process latest messages.
+
+        Used for session close / switch where we must finish before leaving.
+        """
+        self._cancel_idle_timer()
+        async with self._lock:
+            if self._pending_snapshot is not None:
+                messages, message_ids = self._pending_snapshot
+                self._pending_snapshot = None
+            else:
+                messages, message_ids = self._snapshot(state)
+            await self._run_one_consolidation(
+                trigger=trigger,
+                state=state,
+                messages=messages,
+                message_ids=message_ids,
+            )
+
+    def _snapshot(
+        self, state: RuntimeState
+    ) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+        if self._message_store is not None:
+            return (
+                self._message_store.current_messages(),
+                self._message_store.current_message_ids(),
+            )
+        return (), ()
+
+    async def _run_one_consolidation(
+        self,
+        *,
+        trigger: str,
+        state: RuntimeState,
+        messages: tuple[dict[str, Any], ...],
+        message_ids: tuple[str, ...],
+    ) -> None:
+        """Execute a single consolidation job (caller holds the lock)."""
+        start_time = time.monotonic()
+        watermark_before = self._load_watermark(state)
+
+        new_messages, new_ids, context_prefix = self._select_range(
+            messages, message_ids, watermark_before
+        )
+
+        skip_reason = self._check_skip(trigger, state, new_messages)
+        if skip_reason is not None:
+            self._trace_recorder.event(
+                "ltm_consolidation_skipped",
+                {
+                    "trigger": trigger,
+                    "reason": skip_reason,
+                    "watermark_before": watermark_before,
+                    "message_count": len(new_messages),
+                },
+            )
+            return
+
+        self._trace_recorder.event(
+            "ltm_consolidation_started",
+            {
+                "trigger": trigger,
+                "watermark_before": watermark_before,
+                "start_message_id": new_ids[0] if new_ids else None,
+                "end_message_id": new_ids[-1] if new_ids else None,
+                "message_count": len(new_messages),
+                "context_prefix_count": len(context_prefix),
+            },
+        )
+
+        # Send context prefix + new messages to the extraction child.
+        child_messages = context_prefix + new_messages
+        job = self.prepare_extraction_job(
+            child_messages,
+            state,
+            tool_calls=(),
+            _check_lock=False,
+        )
+        if job is None:
+            # prepare_extraction_job recorded the skip decision. For
+            # "success-like" skips (main_agent_memory_write, cursor_current),
+            # the messages are effectively processed — advance the watermark
+            # so they are not re-processed on the next consolidation.
+            last_decision = _metadata(state).get("last_decision")
+            if last_decision in ("main_agent_memory_write", "cursor_current"):
+                watermark_after = new_ids[-1] if new_ids else watermark_before
+                self._save_watermark(state, watermark_after)
+                self._trace_recorder.event(
+                    "ltm_consolidation_completed",
+                    {
+                        "trigger": trigger,
+                        "watermark_before": watermark_before,
+                        "watermark_after": watermark_after,
+                        "message_count": len(new_messages),
+                        "duration": round(time.monotonic() - start_time, 3),
+                        "skip_decision": last_decision,
+                    },
+                )
+            return
+
+        try:
+            await self._execute_extraction(job, state)
+        except Exception:
+            # _execute_extraction already recorded the failure trace.
+            # Watermark must NOT advance on failure.
+            duration = time.monotonic() - start_time
+            self._trace_recorder.event(
+                "ltm_consolidation_failed",
+                {
+                    "trigger": trigger,
+                    "watermark_before": watermark_before,
+                    "watermark_after": watermark_before,
+                    "message_count": len(new_messages),
+                    "duration": round(duration, 3),
+                },
+            )
+            return
+
+        # Success (including "nothing worth saving") -> advance watermark.
+        watermark_after = new_ids[-1] if new_ids else watermark_before
+        self._save_watermark(state, watermark_after)
+
+        duration = time.monotonic() - start_time
+        child_session_id = _metadata(state).get("last_result_session_id")
+        self._trace_recorder.event(
+            "ltm_consolidation_completed",
+            {
+                "trigger": trigger,
+                "watermark_before": watermark_before,
+                "watermark_after": watermark_after,
+                "start_message_id": new_ids[0] if new_ids else None,
+                "end_message_id": new_ids[-1] if new_ids else None,
+                "message_count": len(new_messages),
+                "duration": round(duration, 3),
+                "child_session_id": child_session_id,
+            },
+        )
+
+    def _check_skip(
+        self,
+        trigger: str,
+        state: RuntimeState,
+        new_messages: tuple[dict[str, Any], ...],
+    ) -> str | None:
+        _ = trigger
+        if not self._policy.enabled:
+            return "disabled"
+        if state.metadata.get("long_term_memory_extraction_agent") is True:
+            return "extraction_child"
+        if state.metadata.get("is_fork_child") is True:
+            return "fork_child"
+        if not new_messages:
+            return "no_new_messages"
+        return None
+
+    def _select_range(
+        self,
+        messages: tuple[dict[str, Any], ...],
+        message_ids: tuple[str, ...],
+        watermark: str | None,
+    ) -> tuple[
+        tuple[dict[str, Any], ...],
+        tuple[str, ...],
+        tuple[dict[str, Any], ...],
+    ]:
+        """Return ``(new_messages, new_ids, context_prefix)`` after watermark.
+
+        If the watermark UUID is not found (e.g. compaction replaced the
+        active chain), synthetic compact boundary/summary messages are skipped
+        and consolidation starts from the first real message.
+        """
+        if not watermark:
+            return messages, message_ids, ()
+
+        try:
+            idx = message_ids.index(watermark)
+            start = idx + 1
+        except ValueError:
+            start = 0
+            for i, msg in enumerate(messages):
+                meta = msg.get("metadata") or {}
+                if meta.get("is_compact_boundary") or meta.get("is_compact_summary"):
+                    start = i + 1
+                else:
+                    break
+
+        prefix_start = max(0, start - self._policy.context_prefix_messages)
+        context_prefix = messages[prefix_start:start]
+        return messages[start:], message_ids[start:], context_prefix
+
+    # ------------------------------------------------------------------
+    # Watermark persistence
+    # ------------------------------------------------------------------
+
+    def _load_watermark(self, state: RuntimeState) -> str | None:
+        """Load watermark from in-memory cache, then file, then legacy cursor."""
+        meta = _metadata(state)
+        cached = meta.get("last_ltm_consolidated_message_id")
+        if isinstance(cached, str) and cached:
+            return cached
+
+        path = self._watermark_path(state)
+        if path is not None and path.exists():
             try:
-                self.store.ensure_exists()
-                request = SubagentRequest(
-                    prompt=job.prompt,
-                    subagent_type=None,
-                    parent_session_id=job.parent_session_id,
-                    parent_tool_call_id=job.parent_tool_call_id,
-                    metadata={
-                        "purpose": "long_term_memory_extraction",
-                        "allowed_memory_dir": job.allowed_memory_dir,
-                        "max_turns": job.max_turns,
-                    },
-                )
-                result = await self._subagent_runner.run(request)
-                if result.is_error:
-                    raise RuntimeError(result.final_text)
-                _advance_cursor(job.messages, state)
-                _merge_metadata(
-                    state,
+                data = json.loads(path.read_text(encoding="utf-8"))
+                wm = data.get("last_ltm_consolidated_message_id")
+                if isinstance(wm, str) and wm:
+                    _merge_metadata(state, {"last_ltm_consolidated_message_id": wm})
+                    return wm
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        cursor = meta.get("cursor")
+        if isinstance(cursor, str) and cursor:
+            return cursor
+
+        return None
+
+    def _save_watermark(self, state: RuntimeState, message_id: str) -> None:
+        """Persist watermark to file and in-memory cache (and legacy cursor)."""
+        _merge_metadata(
+            state,
+            {
+                "last_ltm_consolidated_message_id": message_id,
+                "cursor": message_id,
+            },
+        )
+        path = self._watermark_path(state)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
                     {
-                        "last_status": "success",
-                        "last_completed_at": _now(),
-                        "last_result_session_id": result.session_id,
-                        "running": False,
+                        "last_ltm_consolidated_message_id": message_id,
+                        "updated_at": _now(),
                     },
-                )
-                self._trace_recorder.event(
-                    "long_term_memory_extraction_completed",
-                    {
-                        "status": "success",
-                        "memory_dir": self.store.memory_dir,
-                        "child_session_id": result.session_id,
-                    },
-                )
-            except asyncio.CancelledError:
-                _merge_metadata(
-                    state,
-                    {
-                        "last_status": "killed",
-                        "last_completed_at": _now(),
-                        "running": False,
-                    },
-                )
-                self._trace_recorder.event(
-                    "long_term_memory_extraction_cancelled",
-                    {"memory_dir": self.store.memory_dir},
-                )
-                raise
-            except Exception as exc:
-                _merge_metadata(
-                    state,
-                    {
-                        "last_status": "failed",
-                        "last_completed_at": _now(),
-                        "last_error_type": type(exc).__name__,
-                        "running": False,
-                    },
-                )
-                self._trace_recorder.event(
-                    "long_term_memory_extraction_failed",
-                    {"error_type": type(exc).__name__, "memory_dir": self.store.memory_dir},
-                )
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _watermark_path(self, state: RuntimeState) -> Path | None:
+        _ = state
+        if self._message_store is not None:
+            session_dir = getattr(self._message_store.transcript_store, "session_dir", None)
+            if session_dir is not None:
+                return Path(session_dir) / WATERMARK_FILENAME
+        return None
+
+
+# ======================================================================
+# Module-level helpers (kept for backward compatibility)
+# ======================================================================
 
 
 def should_extract_long_term_memory(
@@ -227,6 +670,7 @@ def _extraction_prompt(
         f"- {item.relative_path}: {item.description} ({item.type})"
         for item in store.scan()[:200]
     )
+    conversation = _format_messages_for_prompt(messages)
     return "\n".join(
         [
             "Update workspace-local Nervure long-term memory if the new conversation contains durable future-useful facts.",
@@ -246,8 +690,32 @@ def _extraction_prompt(
             "",
             "Existing memory catalog:",
             catalog or "(empty)",
+            "",
+            "Conversation to process:",
+            conversation or "(empty)",
         ]
     )
+
+
+def _format_messages_for_prompt(messages: tuple[dict[str, Any], ...]) -> str:
+    """Render messages as ``role: content`` lines for the extraction prompt."""
+    lines: list[str] = []
+    for message in messages:
+        role = str(message.get("role", "unknown"))
+        content = message.get("content")
+        if isinstance(content, list):
+            rendered = " ".join(
+                str(block.get("text", "")) if isinstance(block, dict) else str(block)
+                for block in content
+            )
+        else:
+            rendered = str(content or "")
+        rendered = rendered.replace("\r\n", "\n").strip()
+        if len(rendered) > 2000:
+            rendered = rendered[:2000] + "...[truncated]"
+        lines.append(f"[{role}]: {rendered}")
+    return "\n".join(lines)
+
 
 
 def _main_agent_wrote_memory_this_turn(state: RuntimeState) -> bool:
