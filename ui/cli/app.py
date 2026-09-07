@@ -442,6 +442,11 @@ def build_runtime(
     )
     long_term_memory_extractor_ref = {"extractor": long_term_memory_extractor}
 
+    def _on_user_prompt_submit(payload: dict[str, object]) -> None:
+        long_term_memory_extractor_ref["extractor"].cancel_idle()
+
+    hooks.register(HookEvent.USER_PROMPT_SUBMIT, _on_user_prompt_submit)
+
     async def _on_turn_stopped(payload: dict[str, object]) -> None:
         extractor = long_term_memory_extractor_ref["extractor"]
         state = payload.get("state")
@@ -462,14 +467,16 @@ def build_runtime(
         messages = payload.get("messages")
         if not isinstance(messages, (tuple, list)):
             messages = None
+        message_ids = payload.get("message_ids")
+        if not isinstance(message_ids, (tuple, list)):
+            message_ids = None
         # Non-blocking: the payload already carries a deepcopy of pre-compact
         # messages, so consolidation can run async while compact rewrites the store.
-        asyncio.create_task(
-            extractor.consolidate(
-                trigger="full_compact",
-                state=state,
-                messages=tuple(messages) if messages is not None else None,
-            )
+        extractor.schedule_consolidation(
+            trigger="full_compact",
+            state=state,
+            messages=tuple(messages) if messages is not None else None,
+            message_ids=tuple(message_ids) if message_ids is not None else None,
         )
 
     hooks.register(HookEvent.PRE_COMPACT, _on_pre_compact)

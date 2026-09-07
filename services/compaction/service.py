@@ -515,6 +515,11 @@ class ContextCompactionService:
                     if self._message_store is not None
                     else ()
                 ),
+                "message_ids": (
+                    self._message_store.current_message_ids()
+                    if self._message_store is not None
+                    else ()
+                ),
             },
         )
         return dict(result.metadata)
@@ -625,6 +630,7 @@ class ContextCompactionService:
             is_result_candidate = (
                 next_message.get("role") == "tool_result"
                 and isinstance(content, str)
+                and (next_message.get("metadata") or {}).get("result_stored") is not True
             )
             if not is_result_candidate:
                 projected.append(next_message)

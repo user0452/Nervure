@@ -203,6 +203,7 @@ class MessageStore:
         """
 
         self._messages.clear()
+        self._message_ids.clear()
         self._last_uuid = None
         self._transcript_store.switch_session(new_session_id)
 
@@ -237,9 +238,7 @@ class MessageStore:
 
         message_store = cls(transcript_store=transcript_store)
         message_store._messages = [deepcopy(message) for message in restored.messages]
-        message_store._message_ids = [
-            f"restored:{index}" for index, _ in enumerate(restored.messages)
-        ]
+        message_store._message_ids = list(restored.message_ids)
         message_store._last_uuid = restored.last_uuid
         return message_store
 

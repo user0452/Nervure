@@ -89,12 +89,7 @@ async def run_batch_async(workspace: Path) -> int:
 
 
 async def _shutdown(runtime: CliRuntime) -> None:
-    runtime.persist_session_state()
-    runtime.message_store.flush_transcript()
-    runtime.trace_recorder.flush()
-    runtime.error_log_recorder.flush()
-    if runtime.mcp_manager is not None:
-        await runtime.mcp_manager.close_all()
+    await runtime.close()
 
 
 def run_batch(workspace: Path) -> int:

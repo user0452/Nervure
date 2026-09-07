@@ -34,8 +34,8 @@ from core.runtime_state import InteractionKind, RunStatus, RuntimeState
 from services.errors import actionable_error_message
 from services.plans import build_plan_attachments_for_state
 from ui.cli import renderer
-from ui.cli.commands import dispatch_command
-from ui.cli.resume import list_session_summaries, restore_runtime_from_target
+from ui.cli.commands import dispatch_command_async
+from ui.cli.resume import list_session_summaries
 from ui.cli.suggestions import SuggestionItem
 from ui.cli.terminal.connect_flow import run_connect_flow
 from ui.cli.terminal.detect import detect_terminal_brightness
@@ -147,7 +147,7 @@ class InlineRepl:
     # --- command dispatch -------------------------------------------------
 
     async def _handle_command(self, line: str) -> None:
-        result = dispatch_command(self._runtime, line)
+        result = await dispatch_command_async(self._runtime, line)
         if result.interaction == "resume_selector":
             result = await self._run_resume_selector()
         elif result.interaction == "connect":
@@ -237,26 +237,8 @@ class InlineRepl:
         if chosen is None:
             return CommandResult()
         assert chosen.value is not None
-        try:
-            resumed = restore_runtime_from_target(self._runtime, chosen.value.session_id)
-        except Exception as exc:
-            return CommandResult(renderable=renderer.render_error(str(exc)))
-        return CommandResult(
-            runtime=resumed,
-            renderable=renderer.render_resume(
-                resumed.state.session_id,
-                resumed.message_store.transcript_store.messages_path,
-                resumed.workspace,
-                classification=str(
-                    resumed.state.metadata.get(
-                        "resume_classification",
-                        "SAFE_RESUME",
-                    )
-                ),
-                reasons=tuple(resumed.state.metadata.get("resume_reasons", ())),
-            ),
-            presentation="inline",
-            replay_messages=resumed.message_store.current_messages(),
+        return await dispatch_command_async(
+            self._runtime, f"/resume {chosen.value.session_id}"
         )
 
     async def _run_connect_flow(self) -> CommandResult:
@@ -548,22 +530,7 @@ class InlineRepl:
 
     def _shutdown(self) -> None:
         """Synchronous shutdown used only outside an active event loop."""
-        runtime = self._runtime
-        if runtime is None:
-            return
-        runtime.persist_session_state()
-        runtime.message_store.flush_transcript()
-        runtime.trace_recorder.flush()
-        runtime.error_log_recorder.flush()
-        if runtime.mcp_manager is not None:
-            try:
-                asyncio.run(runtime.mcp_manager.close_all())
-            except RuntimeError:
-                # ``asyncio.run`` raises if a loop is already running
-                # in the caller's thread; in that case we let the
-                # process exit and rely on the atexit handler to
-                # close transports.
-                pass
+        asyncio.run(self._shutdown_async())
 
     async def _shutdown_async(self) -> None:
         """Flush and close transports while the TTY loop is still running."""
@@ -571,12 +538,7 @@ class InlineRepl:
         runtime = self._runtime
         if runtime is None:
             return
-        runtime.persist_session_state()
-        runtime.message_store.flush_transcript()
-        runtime.trace_recorder.flush()
-        runtime.error_log_recorder.flush()
-        if runtime.mcp_manager is not None:
-            await runtime.mcp_manager.close_all()
+        await runtime.close()
 
     def _print_untrusted_mcp_notices(self, runtime: CliRuntime) -> None:
         raw = runtime.state.metadata.get("mcp_untrusted_servers", ())

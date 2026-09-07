@@ -147,3 +147,22 @@ def test_model_reconfiguration_preserves_disabled_agent_and_tool_exposure(
     } == normal_names
     assert visible_after == visible_before
     assert visible_after < normal_names
+
+
+def test_model_reconfiguration_keeps_pending_memory_timer(tmp_path, monkeypatch):
+    _patch_external_runtime_boundaries(monkeypatch)
+    runtime = app.build_runtime(tmp_path)
+
+    async def body():
+        extractor = runtime.long_term_memory_extractor
+        runtime.message_store.append_user("pending memory")
+        extractor.mark_dirty(runtime.state)
+        timer = extractor._idle_timer
+        rebound = runtime.with_model_config()
+        assert rebound.long_term_memory_extractor is extractor
+        assert extractor._idle_timer is timer
+        assert not timer.cancelled()
+        assert extractor._subagent_runner is rebound.subagent_runner
+        extractor._cancel_idle_timer()
+
+    asyncio.run(body())

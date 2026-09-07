@@ -27,7 +27,7 @@ from services.checkpoints import CheckpointStore
 from services.guard import SandboxGuard
 from services.observability import ErrorLogRecorder, TraceRecorder
 from services.mcp import McpConnectionManager
-from services.hooks import HookRegistry
+from services.hooks import HookEvent, HookRegistry
 from services.memory import (
     InstructionMemoryLoader,
     LongTermMemoryExtractionService,
@@ -106,6 +106,27 @@ class CliRuntime:
     checkpoint_store: CheckpointStore | None = None
     session_state_store: SessionStateStore | None = None
     session_state_ref: dict[str, Any] | None = None
+    _closed: bool = field(default=False, init=False, repr=False)
+
+    async def run_session_hook(self, event: HookEvent) -> None:
+        if self.hooks is not None:
+            await self.hooks.run(
+                event,
+                {"state": self.state, "session_id": self.state.session_id},
+            )
+
+    async def close(self) -> None:
+        """Drain session work before flushing logs and closing transports."""
+        if self._closed:
+            return
+        await self.run_session_hook(HookEvent.SESSION_CLOSE)
+        self.persist_session_state()
+        self.message_store.flush_transcript()
+        self.trace_recorder.flush()
+        self.error_log_recorder.flush()
+        if self.mcp_manager is not None:
+            await self.mcp_manager.close_all()
+        self._closed = True
 
     def persist_session_state(
         self,
@@ -139,6 +160,8 @@ class CliRuntime:
             self.current_model_context.snapshot = None
         if self.subagent_runner is not None:
             self.subagent_runner.bind_parent_message_store(message_store)
+        if self.long_term_memory_extractor is not None:
+            self.long_term_memory_extractor.bind_message_store(message_store)
         state.metadata["workspace"] = str(self.workspace)
         result_store = ToolResultStorage(message_store.transcript_store.session_dir)
         bind_result_store = getattr(self.tool_executor, "bind_result_store", None)
@@ -269,13 +292,16 @@ class CliRuntime:
 
         long_term_memory_extractor = self.long_term_memory_extractor
         if self.long_term_memory_store is not None and subagent_runner is not None:
-            long_term_memory_extractor = LongTermMemoryExtractionService(
-                self.long_term_memory_store,
-                subagent_runner=subagent_runner,
-                trace_recorder=self.trace_recorder,
-                message_store=self.message_store,
-                background_task_manager=self.background_task_manager,
-            )
+            if long_term_memory_extractor is None:
+                long_term_memory_extractor = LongTermMemoryExtractionService(
+                    self.long_term_memory_store,
+                    subagent_runner=subagent_runner,
+                    trace_recorder=self.trace_recorder,
+                    message_store=self.message_store,
+                    background_task_manager=self.background_task_manager,
+                )
+            else:
+                long_term_memory_extractor.bind_subagent_runner(subagent_runner)
             if self.long_term_memory_extractor_ref is not None:
                 self.long_term_memory_extractor_ref["extractor"] = (
                     long_term_memory_extractor

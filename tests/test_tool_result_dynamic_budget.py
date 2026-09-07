@@ -289,6 +289,28 @@ def test_externalized_result_roundtrip_and_repeat_prepare_stable(tmp_path) -> No
     assert len(messages[0]["content"]) == 30_000 * 3
 
 
+def test_reprojecting_stored_result_preserves_full_original_reference(tmp_path) -> None:
+    store = ToolResultStorage(tmp_path / "session-reproject")
+    service = ContextCompactionService(result_store=store)
+    raw = _result("call-reproject", 30_000)
+    first = _prepare(service, (raw,))
+    original = first.messages[0]
+    messages = (
+        {"role": "user", "content": "y" * (102_000 * 3)},
+        _assistant_call("call-reproject"),
+        original,
+    )
+
+    second = _prepare(service, messages)
+    projected = second.messages[-1]
+
+    assert projected == original
+    assert second.transcript_refs == first.transcript_refs
+    relative_path = projected["metadata"]["stored_result_relative_path"]
+    assert store.read_result(relative_path) == raw["content"]
+    assert [path.name for path in store.results_dir.iterdir()] == ["call-reproject.txt"]
+
+
 def test_legacy_char_budget_still_forces_externalization(tmp_path) -> None:
     store = ToolResultStorage(tmp_path / "session-legacy")
     service = ContextCompactionService(

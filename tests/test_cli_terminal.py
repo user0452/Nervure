@@ -584,7 +584,7 @@ def test_handle_command_reset_main_view_rebuilds_prompt_and_prints_banner(
     )
     monkeypatch.setattr(repl, "_terminal_height", lambda: 5)
 
-    def fake_dispatch(runtime_arg, line: str) -> CommandResult:
+    async def fake_dispatch(runtime_arg, line: str) -> CommandResult:
         assert runtime_arg is runtime
         assert line == "/clear"
         return CommandResult(
@@ -593,7 +593,7 @@ def test_handle_command_reset_main_view_rebuilds_prompt_and_prints_banner(
             renderable=Text("clear notice"),
         )
 
-    monkeypatch.setattr(repl_module, "dispatch_command", fake_dispatch)
+    monkeypatch.setattr(repl_module, "dispatch_command_async", fake_dispatch)
 
     asyncio.run(repl._handle_command("/clear"))
 

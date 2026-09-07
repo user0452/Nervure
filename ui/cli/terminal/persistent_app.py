@@ -428,7 +428,13 @@ class PersistentTerminalApp:
         try:
             await self._app.run_async()
         finally:
-            self.interaction_host.unbind_app(self._app)
+            try:
+                if self._submit_task is not None and not self._submit_task.done():
+                    self._submit_task.cancel()
+                    await asyncio.gather(self._submit_task, return_exceptions=True)
+                await self._on_exit()
+            finally:
+                self.interaction_host.unbind_app(self._app)
 
     def invalidate(self) -> None:
         if self._app.is_running:
@@ -553,14 +559,12 @@ class PersistentTerminalApp:
                 self._buffer.reset()
                 return
             self._closing = True
-            asyncio.create_task(self._on_exit())
             event.app.exit()
 
         @bindings.add(Keys.ControlD, eager=True, filter=normal_input_active)
         def _on_ctrl_d(event) -> None:  # type: ignore[no-untyped-def]
             if not self._buffer.text:
                 self._closing = True
-                asyncio.create_task(self._on_exit())
                 event.app.exit()
 
         @bindings.add(Keys.Escape, eager=True, filter=normal_input_active)

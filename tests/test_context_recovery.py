@@ -35,6 +35,7 @@ def test_restore_drops_orphan_tool_result(tmp_path: Path) -> None:
     restored = restore_transcript_active_chain(store.transcript_store)
 
     assert restored.messages == ()
+    assert restored.message_ids == ()
     assert restored.last_uuid is None
     assert restored.warnings == ("dropped_orphan_tool_result:" + _record_uuid(store),)
 
@@ -62,6 +63,11 @@ def test_restore_inserts_synthetic_result_for_interrupted_tool_call(
     assert restored.messages[1]["tool_name"] == "read_file"
     assert restored.messages[1]["is_error"] is True
     assert restored.messages[1]["metadata"]["synthetic"] is True
+    assert restored.message_ids[0] == store.current_message_ids()[0]
+    assert len(set(restored.message_ids)) == 2
+    assert restored.message_ids == restore_transcript_active_chain(
+        store.transcript_store
+    ).message_ids
 
 
 def test_restore_filters_blank_assistant_without_tool_calls(tmp_path: Path) -> None:
@@ -82,6 +88,7 @@ def test_restore_filters_blank_assistant_without_tool_calls(tmp_path: Path) -> N
     )
 
     assert restored_store.current_messages() == ({"role": "user", "content": "hello"},)
+    assert restored_store.current_message_ids() == store.current_message_ids()[:1]
 
 
 def test_restore_uses_latest_leaf_active_chain(tmp_path: Path) -> None:
@@ -109,6 +116,7 @@ def test_restore_uses_latest_leaf_active_chain(tmp_path: Path) -> None:
         "Summary: old work",
         "after compact",
     ]
+    assert restored.message_ids == store.current_message_ids()
 
 
 def _record_uuid(store: MessageStore) -> str:

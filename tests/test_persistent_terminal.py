@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from core.stream_events import AgentEvent
 from prompt_toolkit.application.current import set_app
@@ -40,6 +43,78 @@ async def _render(app: PersistentTerminalApp) -> None:
 
     with set_app(app.app):
         app.app.renderer.render(app.app, app.app.layout)
+
+
+@pytest.mark.parametrize("key", [Keys.ControlC, Keys.ControlD])
+def test_exit_keys_wait_for_async_cleanup(tmp_path, monkeypatch, key):
+    async def body():
+        cleanup_started = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def on_exit():
+            calls.append("started")
+            cleanup_started.set()
+            await release.wait()
+            calls.append("finished")
+
+        terminal = PersistentTerminalApp(
+            make_runtime(tmp_path),
+            interaction_host=TerminalInteractionHost(),
+            on_submit=lambda text: asyncio.sleep(0),
+            on_exit=on_exit,
+            output=DummyOutput(),
+        )
+
+        async def run_ui():
+            binding = terminal._build_key_bindings().get_bindings_for_keys((key,))[-1]
+            binding.handler(SimpleNamespace(app=SimpleNamespace(exit=lambda: None)))
+            await asyncio.sleep(0)
+
+        monkeypatch.setattr(terminal.app, "run_async", run_ui)
+        task = asyncio.create_task(terminal.run())
+        await cleanup_started.wait()
+        await asyncio.sleep(0)
+        assert not task.done(), "Terminal returned while memory cleanup was still running"
+        release.set()
+        await task
+        assert calls == ["started", "finished"]
+
+    asyncio.run(body())
+
+
+def test_terminal_exit_stops_foreground_task_before_cleanup(tmp_path, monkeypatch):
+    async def body():
+        started = asyncio.Event()
+        calls = []
+
+        async def submit():
+            try:
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                calls.append("foreground_stopped")
+
+        async def on_exit():
+            calls.append("cleanup")
+
+        terminal = PersistentTerminalApp(
+            make_runtime(tmp_path),
+            interaction_host=TerminalInteractionHost(),
+            on_submit=lambda text: asyncio.sleep(0),
+            on_exit=on_exit,
+            output=DummyOutput(),
+        )
+        terminal._submit_task = asyncio.create_task(submit())
+
+        async def run_ui():
+            await started.wait()
+
+        monkeypatch.setattr(terminal.app, "run_async", run_ui)
+        await terminal.run()
+        assert calls == ["foreground_stopped", "cleanup"]
+
+    asyncio.run(body())
 
 
 def test_persistent_renderer_splits_activity_by_model_turn_and_mouse_toggles(

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from core.runtime_state import InteractionKind, PermissionMode
 
 from dataclasses import dataclass
 from pathlib import Path
 import shlex
-from threading import Thread
-from typing import Any, Callable, Iterable
+from typing import Any, Awaitable, Callable, Iterable
 
 from services.plans import (
     PlanStore,
@@ -33,7 +33,9 @@ from ui.cli.resume import resolve_resume_target as _resolve_resume_target
 from ui.cli.resume import restore_runtime_from_target
 from ui.cli.types import CliRuntime, CommandResult
 
-CommandHandler = Callable[["CliRuntime", "CommandInvocation"], CommandResult]
+CommandHandler = Callable[
+    ["CliRuntime", "CommandInvocation"], CommandResult | Awaitable[CommandResult]
+]
 ParameterCompleter = Callable[["CliRuntime", str], Iterable[str]]
 
 
@@ -103,6 +105,20 @@ def visible_commands() -> tuple[CommandSpec, ...]:
 
 
 def dispatch_command(runtime: CliRuntime, line: str) -> CommandResult:
+    result = _dispatch_command(runtime, line)
+    if inspect.isawaitable(result):
+        return _run_async_blocking(result)
+    return result
+
+
+async def dispatch_command_async(runtime: CliRuntime, line: str) -> CommandResult:
+    result = _dispatch_command(runtime, line)
+    return await result if inspect.isawaitable(result) else result
+
+
+def _dispatch_command(
+    runtime: CliRuntime, line: str
+) -> CommandResult | Awaitable[CommandResult]:
     invocation = _parse_invocation(line)
     if invocation is None:
         return CommandResult()
@@ -413,15 +429,15 @@ def _plan_reject(
     )
 
 
-def _compact(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
+async def _compact(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     if runtime.compaction_service is None:
         return CommandResult(
             renderable=renderer.render_error("Compaction is not enabled for this runtime.")
         )
     focus = invocation.arg_text.strip() or None
     try:
-        result = _run_async_blocking(
-            runtime.compaction_service.manual_compact(runtime.state, focus=focus)
+        result = await runtime.compaction_service.manual_compact(
+            runtime.state, focus=focus
         )
     except Exception as exc:
         return CommandResult(renderable=renderer.render_error(str(exc)))
@@ -515,10 +531,10 @@ def _tasks(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     )
 
 
-def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
+async def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
     old_session_id = runtime.state.session_id
-    _fire_session_hook(runtime, HookEvent.SESSION_SWITCH)
+    await runtime.run_session_hook(HookEvent.SESSION_SWITCH)
     runtime.persist_session_state()
     runtime.message_store.flush_transcript()
     new_session_id = runtime.state.start_new_session()
@@ -535,15 +551,15 @@ def _clear(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     )
 
 
-def _resume(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
+async def _resume(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     if not invocation.args:
         return CommandResult(interaction="resume_selector")
     if len(invocation.args) != 1:
         return CommandResult(renderable=renderer.render_error("Usage: /resume [target]"))
 
-    _fire_session_hook(runtime, HookEvent.SESSION_SWITCH)
     try:
         target = _resolve_resume_argument(runtime, invocation.args[0])
+        await runtime.run_session_hook(HookEvent.SESSION_SWITCH)
         resumed = restore_runtime_from_target(runtime, target)
     except _MultipleResumeMatches as exc:
         return CommandResult(
@@ -574,15 +590,9 @@ def _connect(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResul
     return CommandResult(interaction="connect")
 
 
-def _exit(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
+async def _exit(runtime: CliRuntime, invocation: CommandInvocation) -> CommandResult:
     _ = invocation
-    _fire_session_hook(runtime, HookEvent.SESSION_CLOSE)
-    runtime.persist_session_state()
-    runtime.message_store.flush_transcript()
-    runtime.trace_recorder.flush()
-    runtime.error_log_recorder.flush()
-    if runtime.mcp_manager is not None:
-        _run_async_blocking(runtime.mcp_manager.close_all())
+    await runtime.close()
     return CommandResult(should_exit=True)
 
 
@@ -646,44 +656,15 @@ def _looks_like_path_target(target: str) -> bool:
     )
 
 
-def _fire_session_hook(runtime: CliRuntime, event: HookEvent) -> None:
-    """Fire a session lifecycle hook (SESSION_CLOSE / SESSION_SWITCH) synchronously.
-
-    Used to trigger final LTM consolidation before the session is left.
-    """
-    if runtime.hooks is None:
-        return
-    _run_async_blocking(
-        runtime.hooks.run(
-            event,
-            {
-                "state": runtime.state,
-                "session_id": runtime.state.session_id,
-            },
-        )
-    )
-
-
 def _run_async_blocking(awaitable: Any) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(awaitable)
 
-    result: dict[str, Any] = {}
-
-    def runner() -> None:
-        try:
-            result["value"] = asyncio.run(awaitable)
-        except BaseException as exc:
-            result["error"] = exc
-
-    thread = Thread(target=runner, daemon=True)
-    thread.start()
-    thread.join()
-    if "error" in result:
-        raise result["error"]
-    return result.get("value")
+    if inspect.iscoroutine(awaitable):
+        awaitable.close()
+    raise RuntimeError("Use dispatch_command_async inside a running event loop.")
 
 
 def _permission_update_type(value: str) -> PermissionUpdateType | None:

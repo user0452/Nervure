@@ -92,6 +92,17 @@ class LongTermMemoryExtractionService:
         self._idle_timer: Any = None  # asyncio.TimerHandle | None
         self._pending_snapshot: tuple[tuple[dict[str, Any], ...], tuple[str, ...]] | None = None
         self._session_id: str | None = None
+        self._scheduled_tasks: set[asyncio.Task[None]] = set()
+
+    def bind_message_store(self, message_store: MessageStoreLike) -> None:
+        """Rebind only after the previous session's consolidation is flushed."""
+        self._cancel_idle_timer()
+        self._message_store = message_store
+        self._pending_snapshot = None
+        self._session_id = None
+
+    def bind_subagent_runner(self, runner: LongTermMemorySubagentRunner) -> None:
+        self._subagent_runner = runner
 
     # ------------------------------------------------------------------
     # Legacy per-turn API (kept for backward-compatible tests)
@@ -284,7 +295,7 @@ class LongTermMemoryExtractionService:
                 "ltm_consolidation_scheduled",
                 {"trigger": TRIGGER_EXPLICIT, "reason": "main_agent_memory_write"},
             )
-            asyncio.create_task(self.consolidate(trigger=TRIGGER_EXPLICIT, state=state))
+            self.schedule_consolidation(trigger=TRIGGER_EXPLICIT, state=state)
             return
 
         self.schedule_idle(state)
@@ -312,11 +323,46 @@ class LongTermMemoryExtractionService:
             },
         )
 
+    def cancel_idle(self) -> None:
+        """New foreground activity ends the previous idle interval."""
+        self._cancel_idle_timer()
+
     def _on_idle_fire(self, state: RuntimeState) -> None:
         self._idle_timer = None
         if state.session_id != self._session_id:
             return  # stale timer from a previous session
-        asyncio.create_task(self.consolidate(trigger=TRIGGER_IDLE, state=state))
+        self.schedule_consolidation(trigger=TRIGGER_IDLE, state=state)
+
+    def schedule_consolidation(
+        self,
+        *,
+        trigger: str,
+        state: RuntimeState,
+        messages: tuple[dict[str, Any], ...] | None = None,
+        message_ids: tuple[str, ...] | None = None,
+    ) -> None:
+        """Capture now and retain the task so session flush can drain it."""
+        self._cancel_idle_timer()
+        if messages is None or message_ids is None:
+            messages, message_ids = self._snapshot(state)
+        task = asyncio.create_task(
+            self.consolidate(
+                trigger=trigger,
+                state=state,
+                messages=messages,
+                message_ids=message_ids,
+            )
+        )
+        self._scheduled_tasks.add(task)
+        task.add_done_callback(self._on_scheduled_done)
+
+    def _on_scheduled_done(self, task: asyncio.Task[None]) -> None:
+        self._scheduled_tasks.discard(task)
+        if not task.cancelled() and (error := task.exception()) is not None:
+            self._trace_recorder.event(
+                "ltm_consolidation_failed",
+                {"error_type": type(error).__name__},
+            )
 
     def _cancel_idle_timer(self) -> None:
         if self._idle_timer is not None:
@@ -333,16 +379,27 @@ class LongTermMemoryExtractionService:
     ) -> None:
         """Run one consolidation job; coalesces concurrent triggers.
 
-        If a consolidation is already running, the latest snapshot is stored
-        as pending and processed immediately after the current run finishes.
+        If a consolidation is already running, snapshots are coalesced and
+        processed immediately after the current run finishes.
         """
         self._cancel_idle_timer()
 
         if messages is None or message_ids is None:
             messages, message_ids = self._snapshot(state)
 
-        # Coalesce: if already running, store latest snapshot as pending.
+        # Retain messages from a pending pre-compact snapshot even if a later
+        # trigger sees a replacement chain with different UUIDs.
         if self._lock.locked():
+            if self._pending_snapshot is not None:
+                pending_messages, pending_ids = self._pending_snapshot
+                known_ids = set(pending_ids)
+                additions = [
+                    (message, message_id)
+                    for message, message_id in zip(messages, message_ids)
+                    if message_id not in known_ids
+                ]
+                messages = pending_messages + tuple(item[0] for item in additions)
+                message_ids = pending_ids + tuple(item[1] for item in additions)
             self._pending_snapshot = (messages, message_ids)
             self._trace_recorder.event(
                 "ltm_consolidation_scheduled",
@@ -382,12 +439,19 @@ class LongTermMemoryExtractionService:
         Used for session close / switch where we must finish before leaving.
         """
         self._cancel_idle_timer()
+        while self._scheduled_tasks:
+            await asyncio.gather(*tuple(self._scheduled_tasks), return_exceptions=True)
         async with self._lock:
             if self._pending_snapshot is not None:
                 messages, message_ids = self._pending_snapshot
                 self._pending_snapshot = None
-            else:
-                messages, message_ids = self._snapshot(state)
+                await self._run_one_consolidation(
+                    trigger=trigger,
+                    state=state,
+                    messages=messages,
+                    message_ids=message_ids,
+                )
+            messages, message_ids = self._snapshot(state)
             await self._run_one_consolidation(
                 trigger=trigger,
                 state=state,
@@ -581,11 +645,15 @@ class LongTermMemoryExtractionService:
         if path is not None and path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                wm = data.get("last_ltm_consolidated_message_id")
+                wm = (
+                    data.get("last_ltm_consolidated_message_id")
+                    if isinstance(data, dict)
+                    else None
+                )
                 if isinstance(wm, str) and wm:
                     _merge_metadata(state, {"last_ltm_consolidated_message_id": wm})
                     return wm
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError):
                 pass
 
         cursor = meta.get("cursor")

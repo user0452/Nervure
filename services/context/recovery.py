@@ -17,6 +17,7 @@ class RestoredTranscript:
     messages: tuple[dict[str, Any], ...]
     last_uuid: str | None
     warnings: tuple[str, ...] = ()
+    message_ids: tuple[str, ...] = ()
 
 
 def restore_transcript_active_chain(
@@ -38,12 +39,13 @@ def restore_transcript_active_chain(
         )
 
     chain = _select_active_chain(loaded)
-    messages, last_uuid, warnings = _sanitize_chain(chain)
+    messages, message_ids, last_uuid, warnings = _sanitize_chain(chain)
     return RestoredTranscript(
         session_id=chain[-1].session_id if chain else loaded[-1].session_id,
         messages=messages,
         last_uuid=last_uuid,
         warnings=tuple(warnings),
+        message_ids=message_ids,
     )
 
 
@@ -84,8 +86,9 @@ def _leaf_sort_key(item: LoadedTranscriptMessage) -> tuple[int, float, int]:
 
 def _sanitize_chain(
     chain: tuple[LoadedTranscriptMessage, ...],
-) -> tuple[tuple[dict[str, Any], ...], str | None, list[str]]:
+) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...], str | None, list[str]]:
     restored: list[dict[str, Any]] = []
+    message_ids: list[str] = []
     warnings: list[str] = []
     last_uuid: str | None = None
     index = 0
@@ -101,6 +104,7 @@ def _sanitize_chain(
                 index += 1
                 continue
             restored.append(message)
+            message_ids.append(item.uuid)
             last_uuid = item.uuid
             if not call_ids:
                 index += 1
@@ -121,6 +125,7 @@ def _sanitize_chain(
                         or "unknown_tool",
                     )
                     restored.append(result)
+                    message_ids.append(result_item.uuid)
                     matched.add(tool_call_id)
                     last_uuid = result_item.uuid
                 else:
@@ -130,6 +135,7 @@ def _sanitize_chain(
                 if tool_call_id in matched:
                     continue
                 restored.append(_synthetic_interrupted_tool_result(tool_call_id, tool_name))
+                message_ids.append(f"{item.uuid}:interrupted:{tool_call_id}")
                 warnings.append(f"inserted_interrupted_tool_result:{tool_call_id}")
             continue
 
@@ -139,10 +145,11 @@ def _sanitize_chain(
             continue
 
         restored.append(message)
+        message_ids.append(item.uuid)
         last_uuid = item.uuid
         index += 1
 
-    return tuple(restored), last_uuid, warnings
+    return tuple(restored), tuple(message_ids), last_uuid, warnings
 
 
 def _assistant_tool_call_ids(message: dict[str, Any]) -> tuple[tuple[str, str], ...]:
